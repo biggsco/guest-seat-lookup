@@ -1,0 +1,9 @@
+# Guest Seating Lookup
+
+Minimal Node/Express starter for Render with Postgres.
+
+Routes:
+- /
+- /search
+- /admin
+- /health
