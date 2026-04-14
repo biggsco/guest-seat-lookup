@@ -13,8 +13,6 @@ const HOST = '0.0.0.0';
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Temporary in-memory upload sessions.
-// Fine for now, but these reset if the app redeploys/restarts.
 const uploadSessions = new Map();
 
 function generateToken() {
@@ -559,7 +557,7 @@ app.get('/admin/uploads/:uploadToken/map', (req, res) => {
             ${mappingSelect('seat', session.headers)}
           </p>
 
-          <button type="submit">Import Guests</button>
+          <button type="submit">Replace Guests and Import</button>
         </form>
 
         <h2>Preview</h2>
@@ -590,6 +588,13 @@ app.post('/admin/uploads/:uploadToken/import', async (req, res) => {
   }
 
   try {
+    await pool.query('BEGIN');
+
+    await pool.query(
+      `DELETE FROM guests WHERE event_id = $1`,
+      [session.eventId]
+    );
+
     let imported = 0;
 
     for (const row of session.rows) {
@@ -613,6 +618,7 @@ app.post('/admin/uploads/:uploadToken/import', async (req, res) => {
       imported += 1;
     }
 
+    await pool.query('COMMIT');
     uploadSessions.delete(uploadToken);
 
     res.send(`
@@ -622,13 +628,19 @@ app.post('/admin/uploads/:uploadToken/import', async (req, res) => {
         </head>
         <body>
           <h1>Import Complete</h1>
-          <p>Imported ${imported} guests into ${escapeHtml(session.eventName)}.</p>
+          <p>Replaced guest list and imported ${imported} guests into ${escapeHtml(session.eventName)}.</p>
           <p><a href="/search?event=${encodeURIComponent(session.eventToken)}">Open Public Search</a></p>
           <p><a href="/admin/events">Back to Events</a></p>
         </body>
       </html>
     `);
   } catch (err) {
+    try {
+      await pool.query('ROLLBACK');
+    } catch (rollbackErr) {
+      console.error('Rollback failed:', rollbackErr);
+    }
+
     res.status(500).send(escapeHtml(err.message));
   }
 });
@@ -732,7 +744,12 @@ app.post('/admin/purge', async (req, res) => {
       </html>
     `);
   } catch (err) {
-    await pool.query('ROLLBACK');
+    try {
+      await pool.query('ROLLBACK');
+    } catch (rollbackErr) {
+      console.error('Rollback failed:', rollbackErr);
+    }
+
     res.status(500).send(escapeHtml(err.message));
   }
 });
