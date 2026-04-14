@@ -3,6 +3,9 @@ const multer = require('multer');
 const XLSX = require('xlsx');
 const crypto = require('crypto');
 const path = require('path');
+const session = require('express-session');
+const pgSession = require('connect-pg-simple');
+const bcrypt = require('bcryptjs');
 const { pool, testDb } = require('./db');
 const {
   escapeHtml,
@@ -15,13 +18,40 @@ const {
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
+const PgSession = pgSession(session);
 
 const PORT = process.env.PORT || 10000;
 const HOST = '0.0.0.0';
 
+const SESSION_SECRET = process.env.SESSION_SECRET;
+const BOOTSTRAP_SECRET = process.env.BOOTSTRAP_SECRET || '';
+
+if (!SESSION_SECRET) {
+  throw new Error('SESSION_SECRET is required');
+}
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+app.use(
+  session({
+    store: new PgSession({
+      pool,
+      tableName: 'user_sessions',
+      createTableIfMissing: true
+    }),
+    secret: SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: false,
+      maxAge: 1000 * 60 * 60 * 12
+    }
+  })
+);
 
 const uploadSessions = new Map();
 
@@ -140,6 +170,41 @@ async function getEventByToken(token) {
   return result.rows[0] || null;
 }
 
+async function getAdminByUsername(username) {
+  const result = await pool.query(
+    `
+    SELECT id, username, password_hash, created_at
+    FROM admins
+    WHERE username = $1
+    `,
+    [username]
+  );
+
+  return result.rows[0] || null;
+}
+
+async function countAdmins() {
+  const result = await pool.query(`SELECT COUNT(*)::int AS count FROM admins`);
+  return result.rows[0].count;
+}
+
+function requireAdmin(req, res, next) {
+  if (req.session && req.session.adminUser) {
+    return next();
+  }
+
+  const redirectTo = encodeURIComponent(req.originalUrl || '/admin/events');
+  return res.redirect(`/admin/login?next=${redirectTo}`);
+}
+
+function adminNav(extraLinks = []) {
+  return renderTopNav([
+    { href: '/admin/events', label: 'Events' },
+    ...extraLinks,
+    { href: '/admin/logout', label: 'Log Out' }
+  ]);
+}
+
 app.get('/', (req, res) => {
   res.send(
     renderLayout(
@@ -158,7 +223,7 @@ app.get('/', (req, res) => {
         <div class="grid cards">
           <div class="card">
             <h2>Admin</h2>
-            <p class="muted">Create events, upload guest files, publish when ready, and manage imports.</p>
+            <p class="muted">Log in to manage events, upload guest files, and publish search pages.</p>
             <div class="actions">
               <a class="button" href="/admin/events">Open Admin</a>
             </div>
@@ -172,18 +237,228 @@ app.get('/', (req, res) => {
               <a class="button secondary" href="/setup">Setup / Update DB</a>
             </div>
           </div>
-
-          <div class="card">
-            <h2>Reset Data</h2>
-            <p class="muted">Clear all events and guests when you want a clean test environment.</p>
-            <div class="actions">
-              <a class="button danger" href="/admin/purge">Purge Database</a>
-            </div>
-          </div>
         </div>
       `
     )
   );
+});
+
+app.get('/admin/login', async (req, res) => {
+  const nextUrl = (req.query.next || '/admin/events').toString();
+  const adminCount = await countAdmins();
+
+  res.send(
+    renderLayout(
+      'Admin Login',
+      `
+        <div class="panel" style="max-width: 520px; margin: 40px auto 0;">
+          <h1 style="margin-top: 0;">Admin Login</h1>
+          <p class="muted">Sign in to manage events and guest lists.</p>
+
+          ${
+            adminCount === 0
+              ? `
+                <div class="notice warning">
+                  No admin users exist yet. Create the first one at
+                  <span class="code-line">/admin/bootstrap?secret=YOUR_BOOTSTRAP_SECRET</span>.
+                </div>
+              `
+              : ''
+          }
+
+          <form method="POST" action="/admin/login">
+            <input type="hidden" name="next" value="${escapeHtml(nextUrl)}" />
+
+            <div class="field">
+              <label for="username">Username</label>
+              <input id="username" name="username" required />
+            </div>
+
+            <div class="field">
+              <label for="password">Password</label>
+              <input id="password" type="password" name="password" required />
+            </div>
+
+            <div class="actions">
+              <button type="submit">Log In</button>
+              <a class="button secondary" href="/">Home</a>
+            </div>
+          </form>
+        </div>
+      `
+    )
+  );
+});
+
+app.post('/admin/login', async (req, res) => {
+  const username = (req.body.username || '').trim();
+  const password = String(req.body.password || '');
+  const nextUrl = (req.body.next || '/admin/events').toString();
+
+  try {
+    const admin = await getAdminByUsername(username);
+
+    if (!admin) {
+      return res.status(401).send(
+        renderLayout(
+          'Admin Login',
+          `
+            <div class="panel" style="max-width: 520px; margin: 40px auto 0;">
+              <h1 style="margin-top: 0;">Admin Login</h1>
+              <div class="notice danger">Invalid username or password.</div>
+              <div class="actions">
+                <a class="button secondary" href="/admin/login">Try Again</a>
+              </div>
+            </div>
+          `
+        )
+      );
+    }
+
+    const ok = await bcrypt.compare(password, admin.password_hash);
+
+    if (!ok) {
+      return res.status(401).send(
+        renderLayout(
+          'Admin Login',
+          `
+            <div class="panel" style="max-width: 520px; margin: 40px auto 0;">
+              <h1 style="margin-top: 0;">Admin Login</h1>
+              <div class="notice danger">Invalid username or password.</div>
+              <div class="actions">
+                <a class="button secondary" href="/admin/login">Try Again</a>
+              </div>
+            </div>
+          `
+        )
+      );
+    }
+
+    req.session.adminUser = {
+      id: admin.id,
+      username: admin.username
+    };
+
+    res.redirect(nextUrl.startsWith('/admin') ? nextUrl : '/admin/events');
+  } catch (err) {
+    res.status(500).send(escapeHtml(err.message));
+  }
+});
+
+app.get('/admin/logout', requireAdmin, (req, res) => {
+  req.session.destroy(() => {
+    res.redirect('/admin/login');
+  });
+});
+
+app.get('/admin/bootstrap', async (req, res) => {
+  const providedSecret = String(req.query.secret || '');
+
+  if (!BOOTSTRAP_SECRET || providedSecret !== BOOTSTRAP_SECRET) {
+    return res.status(403).send(
+      renderLayout(
+        'Bootstrap Forbidden',
+        `
+          <div class="panel" style="max-width: 640px; margin: 40px auto 0;">
+            <h1 style="margin-top: 0;">Bootstrap Forbidden</h1>
+            <div class="notice danger">Valid bootstrap secret required.</div>
+          </div>
+        `
+      )
+    );
+  }
+
+  const adminCount = await countAdmins();
+
+  if (adminCount > 0) {
+    return res.send(
+      renderLayout(
+        'Bootstrap Complete',
+        `
+          <div class="panel" style="max-width: 640px; margin: 40px auto 0;">
+            <h1 style="margin-top: 0;">Admin Already Exists</h1>
+            <p class="muted">You already have at least one admin account.</p>
+            <div class="actions">
+              <a class="button" href="/admin/login">Go to Login</a>
+            </div>
+          </div>
+        `
+      )
+    );
+  }
+
+  res.send(
+    renderLayout(
+      'Create First Admin',
+      `
+        <div class="panel" style="max-width: 640px; margin: 40px auto 0;">
+          <h1 style="margin-top: 0;">Create First Admin</h1>
+          <p class="muted">This page only works with the correct bootstrap secret and only while no admin users exist.</p>
+
+          <form method="POST" action="/admin/bootstrap">
+            <input type="hidden" name="secret" value="${escapeHtml(providedSecret)}" />
+
+            <div class="field">
+              <label for="username">Username</label>
+              <input id="username" name="username" required />
+            </div>
+
+            <div class="field">
+              <label for="password">Password</label>
+              <input id="password" type="password" name="password" required />
+            </div>
+
+            <div class="actions">
+              <button type="submit">Create Admin</button>
+              <a class="button secondary" href="/">Home</a>
+            </div>
+          </form>
+        </div>
+      `
+    )
+  );
+});
+
+app.post('/admin/bootstrap', async (req, res) => {
+  const secret = String(req.body.secret || '');
+  const username = (req.body.username || '').trim();
+  const password = String(req.body.password || '');
+
+  if (!BOOTSTRAP_SECRET || secret !== BOOTSTRAP_SECRET) {
+    return res.status(403).send('Invalid bootstrap secret.');
+  }
+
+  const adminCount = await countAdmins();
+
+  if (adminCount > 0) {
+    return res.status(400).send('Admin already exists.');
+  }
+
+  if (!username || !password) {
+    return res.status(400).send('Username and password are required.');
+  }
+
+  try {
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    const result = await pool.query(
+      `
+      INSERT INTO admins (username, password_hash)
+      VALUES ($1, $2)
+      RETURNING id, username
+      `,
+      [username, passwordHash]
+    );
+
+    req.session.adminUser = {
+      id: result.rows[0].id,
+      username: result.rows[0].username
+    };
+
+    res.redirect('/admin/events');
+  } catch (err) {
+    res.status(500).send(escapeHtml(err.message));
+  }
 });
 
 app.get('/search', async (req, res) => {
@@ -327,6 +602,16 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
+app.use('/admin', (req, res, next) => {
+  const publicAdminPaths = ['/admin/login', '/admin/bootstrap'];
+
+  if (publicAdminPaths.includes(req.path) || publicAdminPaths.includes(req.originalUrl.split('?')[0])) {
+    return next();
+  }
+
+  return requireAdmin(req, res, next);
+});
+
 app.get('/admin/events', async (req, res) => {
   try {
     const result = await pool.query(
@@ -355,15 +640,12 @@ app.get('/admin/events', async (req, res) => {
     );
 
     const body = `
-      ${renderTopNav([
-        { href: '/', label: 'Home' },
-        { href: '/admin/purge', label: 'Purge Database' }
-      ])}
+      ${adminNav([{ href: '/', label: 'Home' }])}
 
       <div class="hero">
         <div>
           <h1>Events</h1>
-          <p>Create events, upload guest files, publish when ready, and manage each event from one place.</p>
+          <p>Signed in as <strong>${escapeHtml(req.session.adminUser.username)}</strong>.</p>
         </div>
         <div class="actions" style="margin-top: 0;">
           <a class="button" href="/admin/events/new">Create Event</a>
@@ -436,14 +718,10 @@ app.get('/admin/events/new', (req, res) => {
     renderLayout(
       'Create Event',
       `
-        ${renderTopNav([
-          { href: '/admin/events', label: 'Back to Events' }
-        ])}
+        ${adminNav([{ href: '/admin/events', label: 'Back to Events' }])}
 
         <div class="panel" style="max-width: 720px; margin: 0 auto;">
           <h1 style="margin-top: 0;">Create Event</h1>
-          <p class="muted">Create a new event workspace and generate its public token automatically.</p>
-
           <form method="POST" action="/admin/events/new">
             <div class="field">
               <label for="name">Event Name</label>
@@ -520,7 +798,7 @@ app.get('/admin/events/:token', async (req, res) => {
     );
 
     const body = `
-      ${renderTopNav([
+      ${adminNav([
         { href: '/admin/events', label: 'Back to Events' },
         { href: `/e/${event.public_token}`, label: 'Open Public Search' }
       ])}
@@ -614,7 +892,6 @@ app.get('/admin/events/:token', async (req, res) => {
 
           <div class="danger-zone">
             <h3 style="margin-top: 0;">Danger Zone</h3>
-            <p class="muted">These actions change or remove data for this event.</p>
             <div class="actions">
               <a class="button danger" href="/admin/events/${encodeURIComponent(event.public_token)}/clear">Clear Guest List</a>
               <a class="button danger" href="/admin/events/${encodeURIComponent(event.public_token)}/delete">Delete Event</a>
@@ -641,7 +918,7 @@ app.get('/admin/events/:token/upload', async (req, res) => {
     }
 
     const body = `
-      ${renderTopNav([
+      ${adminNav([
         { href: `/admin/events/${event.public_token}`, label: 'Back to Event' },
         { href: '/admin/events', label: 'All Events' }
       ])}
@@ -735,16 +1012,16 @@ app.post('/admin/events/:token/upload', upload.single('guestFile'), async (req, 
 
 app.get('/admin/uploads/:uploadToken/map', (req, res) => {
   const uploadToken = req.params.uploadToken;
-  const session = uploadSessions.get(uploadToken);
+  const sessionState = uploadSessions.get(uploadToken);
 
-  if (!session) {
+  if (!sessionState) {
     return res.status(404).send('Upload session not found. Upload the file again.');
   }
 
   const body = `
-    ${renderTopNav([
-      { href: `/admin/events/${session.eventToken}/upload`, label: 'Back to Upload' },
-      { href: `/admin/events/${session.eventToken}`, label: 'Event Details' }
+    ${adminNav([
+      { href: `/admin/events/${sessionState.eventToken}/upload`, label: 'Back to Upload' },
+      { href: `/admin/events/${sessionState.eventToken}`, label: 'Event Details' }
     ])}
 
     <div class="grid two">
@@ -752,28 +1029,28 @@ app.get('/admin/uploads/:uploadToken/map', (req, res) => {
         <h1 style="margin-top: 0;">Map Columns</h1>
 
         <div class="event-meta" style="margin-bottom: 18px;">
-          <div>Event: ${escapeHtml(session.eventName)}</div>
-          <div>File: ${escapeHtml(session.originalName)}</div>
-          <div>Sheet: ${escapeHtml(session.sheetName)}</div>
-          <div>Rows Found: ${session.rows.length}</div>
-          <div>Import Mode: ${escapeHtml(session.importMode === 'append' ? 'Append' : 'Replace')}</div>
+          <div>Event: ${escapeHtml(sessionState.eventName)}</div>
+          <div>File: ${escapeHtml(sessionState.originalName)}</div>
+          <div>Sheet: ${escapeHtml(sessionState.sheetName)}</div>
+          <div>Rows Found: ${sessionState.rows.length}</div>
+          <div>Import Mode: ${escapeHtml(sessionState.importMode === 'append' ? 'Append' : 'Replace')}</div>
         </div>
 
         <form method="POST" action="/admin/uploads/${uploadToken}/import">
           <div class="field-row">
             <div class="field">
               <label>Full Name</label>
-              ${renderMappingSelect('full_name', session.headers, session.defaults.full_name)}
+              ${renderMappingSelect('full_name', sessionState.headers, sessionState.defaults.full_name)}
             </div>
 
             <div class="field">
               <label>Company</label>
-              ${renderMappingSelect('company', session.headers, session.defaults.company)}
+              ${renderMappingSelect('company', sessionState.headers, sessionState.defaults.company)}
             </div>
 
             <div class="field">
               <label>Table</label>
-              ${renderMappingSelect('table_name', session.headers, session.defaults.table_name)}
+              ${renderMappingSelect('table_name', sessionState.headers, sessionState.defaults.table_name)}
             </div>
           </div>
 
@@ -782,8 +1059,8 @@ app.get('/admin/uploads/:uploadToken/map', (req, res) => {
           </div>
 
           <div class="actions">
-            <button type="submit">${session.importMode === 'append' ? 'Append Guests' : 'Replace Guests and Import'}</button>
-            <a class="button secondary" href="/admin/events/${encodeURIComponent(session.eventToken)}/upload">Cancel</a>
+            <button type="submit">${sessionState.importMode === 'append' ? 'Append Guests' : 'Replace Guests and Import'}</button>
+            <a class="button secondary" href="/admin/events/${encodeURIComponent(sessionState.eventToken)}/upload">Cancel</a>
           </div>
         </form>
       </div>
@@ -791,7 +1068,7 @@ app.get('/admin/uploads/:uploadToken/map', (req, res) => {
       <div class="panel">
         <h2 style="margin-top: 0;">Preview</h2>
         <div class="table-wrap">
-          ${renderPreviewTable(session.headers, session.rows, 10)}
+          ${renderPreviewTable(sessionState.headers, sessionState.rows, 10)}
         </div>
       </div>
     </div>
@@ -802,9 +1079,9 @@ app.get('/admin/uploads/:uploadToken/map', (req, res) => {
 
 app.post('/admin/uploads/:uploadToken/import', async (req, res) => {
   const uploadToken = req.params.uploadToken;
-  const session = uploadSessions.get(uploadToken);
+  const sessionState = uploadSessions.get(uploadToken);
 
-  if (!session) {
+  if (!sessionState) {
     return res.status(404).send('Upload session not found. Upload the file again.');
   }
 
@@ -819,16 +1096,16 @@ app.post('/admin/uploads/:uploadToken/import', async (req, res) => {
   try {
     await pool.query('BEGIN');
 
-    if (session.importMode === 'replace') {
+    if (sessionState.importMode === 'replace') {
       await pool.query(
         `DELETE FROM guests WHERE event_id = $1`,
-        [session.eventId]
+        [sessionState.eventId]
       );
     }
 
     let imported = 0;
 
-    for (const row of session.rows) {
+    for (const row of sessionState.rows) {
       const full_name = normalizeCell(row[Number(fullNameIndex)]);
       const company = companyIndex === '' ? '' : normalizeCell(row[Number(companyIndex)]);
       const table_name = tableNameIndex === '' ? '' : normalizeCell(row[Number(tableNameIndex)]);
@@ -842,7 +1119,7 @@ app.post('/admin/uploads/:uploadToken/import', async (req, res) => {
         INSERT INTO guests (event_id, full_name, company, table_name)
         VALUES ($1, $2, $3, $4)
         `,
-        [session.eventId, full_name, company, table_name]
+        [sessionState.eventId, full_name, company, table_name]
       );
 
       imported += 1;
@@ -856,7 +1133,7 @@ app.post('/admin/uploads/:uploadToken/import', async (req, res) => {
         last_import_file_name = $2
       WHERE id = $1
       `,
-      [session.eventId, session.originalName]
+      [sessionState.eventId, sessionState.originalName]
     );
 
     await pool.query('COMMIT');
@@ -870,15 +1147,15 @@ app.post('/admin/uploads/:uploadToken/import', async (req, res) => {
             <h1 style="margin-top: 0;">Import Complete</h1>
             <p class="muted">
               ${
-                session.importMode === 'append'
+                sessionState.importMode === 'append'
                   ? `Appended ${imported} guests`
                   : `Replaced guest list and imported ${imported} guests`
-              } into <strong>${escapeHtml(session.eventName)}</strong>.
+              } into <strong>${escapeHtml(sessionState.eventName)}</strong>.
             </p>
 
             <div class="actions">
-              <a class="button" href="/admin/events/${encodeURIComponent(session.eventToken)}">Back to Event</a>
-              <a class="button secondary" href="/e/${encodeURIComponent(session.eventToken)}">Open Public Search</a>
+              <a class="button" href="/admin/events/${encodeURIComponent(sessionState.eventToken)}">Back to Event</a>
+              <a class="button secondary" href="/e/${encodeURIComponent(sessionState.eventToken)}">Open Public Search</a>
             </div>
           </div>
         `
@@ -1139,94 +1416,6 @@ app.post('/admin/events/:token/delete', async (req, res) => {
   }
 });
 
-app.get('/admin/purge', async (req, res) => {
-  try {
-    const eventCountResult = await pool.query(`SELECT COUNT(*)::int AS count FROM events`);
-    const guestCountResult = await pool.query(`SELECT COUNT(*)::int AS count FROM guests`);
-
-    const eventCount = eventCountResult.rows[0].count;
-    const guestCount = guestCountResult.rows[0].count;
-
-    res.send(
-      renderLayout(
-        'Purge Database',
-        `
-          ${renderTopNav([{ href: '/admin/events', label: 'Back to Events' }])}
-
-          <div class="panel" style="max-width: 760px; margin: 0 auto;">
-            <h1 style="margin-top: 0;">Purge Database</h1>
-            <div class="notice danger">
-              This will delete all events and all guests.
-            </div>
-
-            <div class="stats">
-              <div class="stat">
-                <div class="stat-label">Events</div>
-                <div class="stat-value">${eventCount}</div>
-              </div>
-              <div class="stat">
-                <div class="stat-label">Guests</div>
-                <div class="stat-value">${guestCount}</div>
-              </div>
-            </div>
-
-            <form method="POST" action="/admin/purge" style="margin-top: 18px;">
-              <div class="field">
-                <label>Type PURGE to confirm</label>
-                <input name="confirmText" />
-              </div>
-              <div class="actions">
-                <button class="danger" type="submit">Purge Database</button>
-                <a class="button secondary" href="/admin/events">Cancel</a>
-              </div>
-            </form>
-          </div>
-        `
-      )
-    );
-  } catch (err) {
-    res.status(500).send(escapeHtml(err.message));
-  }
-});
-
-app.post('/admin/purge', async (req, res) => {
-  const confirmText = (req.body.confirmText || '').trim();
-
-  if (confirmText !== 'PURGE') {
-    return res.status(400).send('Purge cancelled. Type PURGE exactly.');
-  }
-
-  try {
-    await pool.query('BEGIN');
-    await pool.query(`DELETE FROM guests`);
-    await pool.query(`DELETE FROM events`);
-    await pool.query('COMMIT');
-
-    res.send(
-      renderLayout(
-        'Purge Complete',
-        `
-          <div class="panel" style="max-width: 760px; margin: 0 auto;">
-            <h1 style="margin-top: 0;">Purge Complete</h1>
-            <p class="muted">All guests and events have been deleted.</p>
-            <div class="actions">
-              <a class="button" href="/admin/events">Back to Events</a>
-            </div>
-          </div>
-        `
-      )
-    );
-  } catch (err) {
-    try {
-      await pool.query('ROLLBACK');
-    } catch (rollbackErr) {
-      console.error('Rollback failed:', rollbackErr);
-    }
-
-    res.status(500).send(escapeHtml(err.message));
-  }
-});
-
 app.get('/health', async (req, res) => {
   try {
     const db = await testDb();
@@ -1266,6 +1455,15 @@ app.get('/setup', async (req, res) => {
         full_name TEXT,
         company TEXT,
         table_name TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS admins (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
@@ -1315,15 +1513,20 @@ app.get('/setup', async (req, res) => {
       ON events(public_token);
     `);
 
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS admins_username_idx
+      ON admins(username);
+    `);
+
     res.send(
       renderLayout(
         'Setup Complete',
         `
           <div class="panel" style="max-width: 760px; margin: 0 auto;">
             <h1 style="margin-top: 0;">Setup Complete</h1>
-            <p class="muted">Database tables and columns are ready.</p>
+            <p class="muted">Database tables, admin auth, and session storage are ready.</p>
             <div class="actions">
-              <a class="button" href="/admin/events">Go to Events</a>
+              <a class="button" href="/admin/login">Go to Admin Login</a>
             </div>
           </div>
         `
