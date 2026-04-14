@@ -2,7 +2,16 @@ const express = require('express');
 const multer = require('multer');
 const XLSX = require('xlsx');
 const crypto = require('crypto');
+const path = require('path');
 const { pool, testDb } = require('./db');
+const {
+  escapeHtml,
+  renderLayout,
+  renderTopNav,
+  renderSearchPage,
+  renderPreviewTable,
+  renderMappingSelect
+} = require('./render');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -12,6 +21,7 @@ const HOST = '0.0.0.0';
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, 'public')));
 
 const uploadSessions = new Map();
 
@@ -21,15 +31,6 @@ function generateToken() {
 
 function generateUploadToken() {
   return crypto.randomBytes(12).toString('hex');
-}
-
-function escapeHtml(value) {
-  return String(value || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 function normalizeCell(value) {
@@ -109,499 +110,6 @@ function parseWorkbookFromBuffer(fileBuffer, originalName) {
   };
 }
 
-function renderLayout(title, body, options = {}) {
-  const pageTitle = escapeHtml(title || 'Event Seating');
-  const fullWidth = options.fullWidth ? 'container wide' : 'container';
-
-  return `
-    <html>
-      <head>
-        <title>${pageTitle}</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <style>
-          :root {
-            --bg: #f5f7fb;
-            --panel: #ffffff;
-            --text: #172033;
-            --muted: #5f6b85;
-            --border: #dbe2ee;
-            --primary: #2457ff;
-            --primary-dark: #1945d8;
-            --success: #18794e;
-            --success-bg: #eaf8f0;
-            --warning: #9a6700;
-            --warning-bg: #fff4d6;
-            --danger: #b42318;
-            --danger-bg: #fef3f2;
-            --shadow: 0 12px 36px rgba(18, 35, 66, 0.08);
-            --radius: 18px;
-          }
-
-          * { box-sizing: border-box; }
-
-          body {
-            margin: 0;
-            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            background: linear-gradient(180deg, #f8faff 0%, #f3f6fb 100%);
-            color: var(--text);
-          }
-
-          a {
-            color: var(--primary);
-            text-decoration: none;
-          }
-
-          a:hover {
-            text-decoration: underline;
-          }
-
-          .container {
-            max-width: 1060px;
-            margin: 0 auto;
-            padding: 32px 20px 56px;
-          }
-
-          .container.wide {
-            max-width: 1240px;
-          }
-
-          .hero {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 24px;
-            margin-bottom: 28px;
-            flex-wrap: wrap;
-          }
-
-          .hero h1 {
-            margin: 0 0 10px;
-            font-size: 36px;
-            line-height: 1.05;
-            letter-spacing: -0.03em;
-          }
-
-          .hero p {
-            margin: 0;
-            color: var(--muted);
-            font-size: 16px;
-            line-height: 1.6;
-            max-width: 760px;
-          }
-
-          .panel {
-            background: var(--panel);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            box-shadow: var(--shadow);
-            padding: 22px;
-            margin-bottom: 20px;
-          }
-
-          .panel h2,
-          .panel h3 {
-            margin-top: 0;
-            letter-spacing: -0.02em;
-          }
-
-          .panel p:last-child {
-            margin-bottom: 0;
-          }
-
-          .grid {
-            display: grid;
-            gap: 18px;
-          }
-
-          .grid.cards {
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-          }
-
-          .grid.two {
-            grid-template-columns: 1.3fr 0.9fr;
-          }
-
-          @media (max-width: 900px) {
-            .grid.two {
-              grid-template-columns: 1fr;
-            }
-          }
-
-          .card {
-            background: var(--panel);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            box-shadow: var(--shadow);
-            padding: 22px;
-          }
-
-          .muted {
-            color: var(--muted);
-          }
-
-          .small {
-            font-size: 14px;
-          }
-
-          .badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 7px 12px;
-            border-radius: 999px;
-            font-size: 13px;
-            font-weight: 700;
-          }
-
-          .badge.draft {
-            background: var(--warning-bg);
-            color: var(--warning);
-          }
-
-          .badge.published {
-            background: var(--success-bg);
-            color: var(--success);
-          }
-
-          .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 14px;
-            margin-top: 18px;
-          }
-
-          .stat {
-            background: #f8faff;
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            padding: 16px;
-          }
-
-          .stat-label {
-            color: var(--muted);
-            font-size: 13px;
-            margin-bottom: 8px;
-          }
-
-          .stat-value {
-            font-size: 24px;
-            font-weight: 800;
-            letter-spacing: -0.03em;
-          }
-
-          .actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-top: 18px;
-          }
-
-          .button,
-          button {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            min-height: 42px;
-            padding: 0 16px;
-            border: none;
-            border-radius: 12px;
-            background: var(--primary);
-            color: white;
-            font-weight: 700;
-            font-size: 14px;
-            cursor: pointer;
-            box-shadow: none;
-          }
-
-          .button:hover,
-          button:hover {
-            background: var(--primary-dark);
-            text-decoration: none;
-          }
-
-          .button.secondary {
-            background: white;
-            color: var(--text);
-            border: 1px solid var(--border);
-          }
-
-          .button.secondary:hover {
-            background: #f8faff;
-          }
-
-          .button.success {
-            background: var(--success);
-          }
-
-          .button.success:hover {
-            background: #0f6a42;
-          }
-
-          .button.danger,
-          .danger-zone button {
-            background: var(--danger);
-          }
-
-          .button.danger:hover,
-          .danger-zone button:hover {
-            background: #912018;
-          }
-
-          form.inline {
-            display: inline;
-          }
-
-          label {
-            display: block;
-            font-size: 14px;
-            font-weight: 700;
-            margin-bottom: 8px;
-          }
-
-          input[type="text"],
-          input[type="file"],
-          textarea,
-          select {
-            width: 100%;
-            min-height: 46px;
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 12px 14px;
-            font-size: 15px;
-            background: white;
-            color: var(--text);
-          }
-
-          textarea {
-            min-height: 140px;
-            resize: vertical;
-          }
-
-          input[type="text"]:focus,
-          input[type="file"]:focus,
-          textarea:focus,
-          select:focus {
-            outline: 3px solid rgba(36, 87, 255, 0.14);
-            border-color: var(--primary);
-          }
-
-          .field {
-            margin-bottom: 16px;
-          }
-
-          .field-row {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 16px;
-          }
-
-          .search-shell {
-            max-width: 760px;
-            margin: 0 auto;
-          }
-
-          .search-card {
-            background: var(--panel);
-            border: 1px solid var(--border);
-            border-radius: 24px;
-            box-shadow: var(--shadow);
-            padding: 28px;
-          }
-
-          .search-card h1 {
-            margin: 0 0 10px;
-            font-size: 34px;
-            letter-spacing: -0.03em;
-          }
-
-          .search-form {
-            display: flex;
-            gap: 12px;
-            margin-top: 20px;
-            margin-bottom: 10px;
-            flex-wrap: wrap;
-          }
-
-          .search-form input[type="text"] {
-            flex: 1 1 280px;
-          }
-
-          .results-list {
-            display: grid;
-            gap: 14px;
-            margin-top: 18px;
-          }
-
-          .result-card {
-            padding: 18px;
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            background: #fbfcff;
-          }
-
-          .result-card h3 {
-            margin: 0 0 8px;
-            font-size: 19px;
-          }
-
-          .table-wrap {
-            overflow-x: auto;
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            background: white;
-          }
-
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            background: white;
-          }
-
-          th, td {
-            text-align: left;
-            padding: 12px 14px;
-            border-bottom: 1px solid var(--border);
-            vertical-align: top;
-            font-size: 14px;
-          }
-
-          th {
-            font-size: 13px;
-            color: var(--muted);
-            background: #f8faff;
-            font-weight: 800;
-            letter-spacing: 0.01em;
-          }
-
-          tr:last-child td {
-            border-bottom: none;
-          }
-
-          .event-card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 12px;
-            margin-bottom: 14px;
-          }
-
-          .event-card-title {
-            margin: 0;
-            font-size: 22px;
-            letter-spacing: -0.02em;
-          }
-
-          .event-meta {
-            display: grid;
-            gap: 8px;
-            margin-top: 12px;
-            font-size: 14px;
-            color: var(--muted);
-          }
-
-          .code-line {
-            display: inline-block;
-            background: #f4f7ff;
-            border: 1px solid var(--border);
-            color: #29416e;
-            border-radius: 10px;
-            padding: 6px 10px;
-            font-size: 13px;
-            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-          }
-
-          .empty-state {
-            text-align: center;
-            padding: 40px 24px;
-            border: 1px dashed var(--border);
-            border-radius: 18px;
-            color: var(--muted);
-            background: rgba(255,255,255,0.7);
-          }
-
-          .notice {
-            border-radius: 14px;
-            padding: 14px 16px;
-            margin-bottom: 16px;
-            font-size: 14px;
-          }
-
-          .notice.info {
-            background: #eef4ff;
-            color: #29416e;
-            border: 1px solid #cfe0ff;
-          }
-
-          .notice.warning {
-            background: var(--warning-bg);
-            color: var(--warning);
-            border: 1px solid #f2d38a;
-          }
-
-          .notice.danger {
-            background: var(--danger-bg);
-            color: var(--danger);
-            border: 1px solid #f7c9c5;
-          }
-
-          .danger-zone {
-            border: 1px solid #f3c6c3;
-            background: #fff8f7;
-            border-radius: 18px;
-            padding: 18px;
-          }
-
-          .top-nav {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin-bottom: 20px;
-          }
-
-          .top-nav a {
-            display: inline-flex;
-            align-items: center;
-            min-height: 38px;
-            padding: 0 12px;
-            border-radius: 999px;
-            background: white;
-            border: 1px solid var(--border);
-            color: var(--text);
-            font-size: 14px;
-            font-weight: 700;
-          }
-
-          .top-nav a:hover {
-            background: #f8faff;
-            text-decoration: none;
-          }
-
-          .footer-link {
-            margin-top: 18px;
-            font-size: 14px;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="${fullWidth}">
-          ${body}
-        </div>
-      </body>
-    </html>
-  `;
-}
-
-function renderTopNav(links = []) {
-  return `
-    <div class="top-nav">
-      ${links.map(link => `
-        <a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>
-      `).join('')}
-    </div>
-  `;
-}
-
 async function getEventByToken(token) {
   const result = await pool.query(
     `
@@ -630,60 +138,6 @@ async function getEventByToken(token) {
   );
 
   return result.rows[0] || null;
-}
-
-function renderSearchPage(event, q, results) {
-  const resultsHtml = q
-    ? results.length > 0
-      ? `
-        <div class="results-list">
-          ${results.map(row => `
-            <div class="result-card">
-              <h3>${escapeHtml(row.full_name || 'No name')}</h3>
-              <div class="muted">${escapeHtml(row.company || 'No company')}</div>
-              <div style="margin-top: 10px;"><strong>Table:</strong> ${escapeHtml(row.table_name || 'Not assigned')}</div>
-            </div>
-          `).join('')}
-        </div>
-      `
-      : `
-        <div class="empty-state" style="margin-top: 18px;">
-          No results found for <strong>${escapeHtml(q)}</strong>.
-        </div>
-      `
-    : `
-      <div class="notice info" style="margin-top: 18px;">
-        Search by guest name or company.
-      </div>
-    `;
-
-  return renderLayout(
-    event.name,
-    `
-      <div class="search-shell">
-        <div class="search-card">
-          <div class="muted small" style="margin-bottom: 8px;">Guest seating lookup</div>
-          <h1>${escapeHtml(event.name)}</h1>
-          <p class="muted" style="margin: 0 0 8px;">
-            Search your name or company to find your assigned table.
-          </p>
-
-          <form method="GET" action="/e/${encodeURIComponent(event.public_token)}" class="search-form">
-            <input
-              type="text"
-              name="q"
-              placeholder="Enter guest name or company"
-              value="${escapeHtml(q)}"
-              autofocus
-            />
-            <button type="submit">Search</button>
-          </form>
-
-          ${resultsHtml}
-        </div>
-      </div>
-    `
-  );
 }
 
 app.get('/', (req, res) => {
@@ -1256,18 +710,6 @@ app.post('/admin/events/:token/upload', upload.single('guestFile'), async (req, 
 
     const uploadToken = generateUploadToken();
 
-    const defaultFullName = detectColumnIndex(parsed.headers, [
-      'full name', 'fullname', 'guest name', 'name', 'attendee'
-    ]);
-
-    const defaultCompany = detectColumnIndex(parsed.headers, [
-      'company', 'organisation', 'organization', 'business', 'employer'
-    ]);
-
-    const defaultTable = detectColumnIndex(parsed.headers, [
-      'table', 'table name', 'table number', 'table no'
-    ]);
-
     uploadSessions.set(uploadToken, {
       createdAt: Date.now(),
       eventId: event.id,
@@ -1279,9 +721,9 @@ app.post('/admin/events/:token/upload', upload.single('guestFile'), async (req, 
       rows: parsed.rows,
       importMode,
       defaults: {
-        full_name: defaultFullName,
-        company: defaultCompany,
-        table_name: defaultTable
+        full_name: detectColumnIndex(parsed.headers, ['full name', 'fullname', 'guest name', 'name', 'attendee']),
+        company: detectColumnIndex(parsed.headers, ['company', 'organisation', 'organization', 'business', 'employer']),
+        table_name: detectColumnIndex(parsed.headers, ['table', 'table name', 'table number', 'table no'])
       }
     });
 
@@ -1297,21 +739,6 @@ app.get('/admin/uploads/:uploadToken/map', (req, res) => {
 
   if (!session) {
     return res.status(404).send('Upload session not found. Upload the file again.');
-  }
-
-  const defaults = session.defaults || {};
-
-  function mappingSelectWithDefault(name, headers, defaultValue) {
-    return `
-      <select name="${name}">
-        <option value="">-- Ignore --</option>
-        ${headers.map((header, index) => `
-          <option value="${index}" ${String(defaultValue) === String(index) ? 'selected' : ''}>
-            ${escapeHtml(header)}
-          </option>
-        `).join('')}
-      </select>
-    `;
   }
 
   const body = `
@@ -1336,17 +763,17 @@ app.get('/admin/uploads/:uploadToken/map', (req, res) => {
           <div class="field-row">
             <div class="field">
               <label>Full Name</label>
-              ${mappingSelectWithDefault('full_name', session.headers, defaults.full_name)}
+              ${renderMappingSelect('full_name', session.headers, session.defaults.full_name)}
             </div>
 
             <div class="field">
               <label>Company</label>
-              ${mappingSelectWithDefault('company', session.headers, defaults.company)}
+              ${renderMappingSelect('company', session.headers, session.defaults.company)}
             </div>
 
             <div class="field">
               <label>Table</label>
-              ${mappingSelectWithDefault('table_name', session.headers, defaults.table_name)}
+              ${renderMappingSelect('table_name', session.headers, session.defaults.table_name)}
             </div>
           </div>
 
