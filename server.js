@@ -47,6 +47,22 @@ function formatDateTime(value) {
   });
 }
 
+function detectColumnIndex(headers, keywords) {
+  const lowered = headers.map(h => String(h || '').toLowerCase().trim());
+
+  for (const keyword of keywords) {
+    const exactIndex = lowered.findIndex(h => h === keyword);
+    if (exactIndex !== -1) return exactIndex;
+  }
+
+  for (const keyword of keywords) {
+    const containsIndex = lowered.findIndex(h => h.includes(keyword));
+    if (containsIndex !== -1) return containsIndex;
+  }
+
+  return '';
+}
+
 function parseWorkbookFromBuffer(fileBuffer, originalName) {
   const workbook = XLSX.read(fileBuffer, {
     type: 'buffer',
@@ -93,35 +109,496 @@ function parseWorkbookFromBuffer(fileBuffer, originalName) {
   };
 }
 
-function renderPreviewTable(headers, rows, maxRows = 10) {
-  const previewRows = rows.slice(0, maxRows);
+function renderLayout(title, body, options = {}) {
+  const pageTitle = escapeHtml(title || 'Event Seating');
+  const fullWidth = options.fullWidth ? 'container wide' : 'container';
 
   return `
-    <table border="1" cellpadding="6" cellspacing="0">
-      <thead>
-        <tr>
-          ${headers.map(header => `<th>${escapeHtml(header)}</th>`).join('')}
-        </tr>
-      </thead>
-      <tbody>
-        ${previewRows.map(row => `
-          <tr>
-            ${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}
-          </tr>
-        `).join('')}
-      </tbody>
-    </table>
+    <html>
+      <head>
+        <title>${pageTitle}</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style>
+          :root {
+            --bg: #f5f7fb;
+            --panel: #ffffff;
+            --text: #172033;
+            --muted: #5f6b85;
+            --border: #dbe2ee;
+            --primary: #2457ff;
+            --primary-dark: #1945d8;
+            --success: #18794e;
+            --success-bg: #eaf8f0;
+            --warning: #9a6700;
+            --warning-bg: #fff4d6;
+            --danger: #b42318;
+            --danger-bg: #fef3f2;
+            --shadow: 0 12px 36px rgba(18, 35, 66, 0.08);
+            --radius: 18px;
+          }
+
+          * { box-sizing: border-box; }
+
+          body {
+            margin: 0;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: linear-gradient(180deg, #f8faff 0%, #f3f6fb 100%);
+            color: var(--text);
+          }
+
+          a {
+            color: var(--primary);
+            text-decoration: none;
+          }
+
+          a:hover {
+            text-decoration: underline;
+          }
+
+          .container {
+            max-width: 1060px;
+            margin: 0 auto;
+            padding: 32px 20px 56px;
+          }
+
+          .container.wide {
+            max-width: 1240px;
+          }
+
+          .hero {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 24px;
+            margin-bottom: 28px;
+            flex-wrap: wrap;
+          }
+
+          .hero h1 {
+            margin: 0 0 10px;
+            font-size: 36px;
+            line-height: 1.05;
+            letter-spacing: -0.03em;
+          }
+
+          .hero p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 16px;
+            line-height: 1.6;
+            max-width: 760px;
+          }
+
+          .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 22px;
+            margin-bottom: 20px;
+          }
+
+          .panel h2,
+          .panel h3 {
+            margin-top: 0;
+            letter-spacing: -0.02em;
+          }
+
+          .panel p:last-child {
+            margin-bottom: 0;
+          }
+
+          .grid {
+            display: grid;
+            gap: 18px;
+          }
+
+          .grid.cards {
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+          }
+
+          .grid.two {
+            grid-template-columns: 1.3fr 0.9fr;
+          }
+
+          @media (max-width: 900px) {
+            .grid.two {
+              grid-template-columns: 1fr;
+            }
+          }
+
+          .card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 22px;
+          }
+
+          .muted {
+            color: var(--muted);
+          }
+
+          .small {
+            font-size: 14px;
+          }
+
+          .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 12px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 700;
+          }
+
+          .badge.draft {
+            background: var(--warning-bg);
+            color: var(--warning);
+          }
+
+          .badge.published {
+            background: var(--success-bg);
+            color: var(--success);
+          }
+
+          .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 14px;
+            margin-top: 18px;
+          }
+
+          .stat {
+            background: #f8faff;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 16px;
+          }
+
+          .stat-label {
+            color: var(--muted);
+            font-size: 13px;
+            margin-bottom: 8px;
+          }
+
+          .stat-value {
+            font-size: 24px;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+          }
+
+          .actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 18px;
+          }
+
+          .button,
+          button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            min-height: 42px;
+            padding: 0 16px;
+            border: none;
+            border-radius: 12px;
+            background: var(--primary);
+            color: white;
+            font-weight: 700;
+            font-size: 14px;
+            cursor: pointer;
+            box-shadow: none;
+          }
+
+          .button:hover,
+          button:hover {
+            background: var(--primary-dark);
+            text-decoration: none;
+          }
+
+          .button.secondary {
+            background: white;
+            color: var(--text);
+            border: 1px solid var(--border);
+          }
+
+          .button.secondary:hover {
+            background: #f8faff;
+          }
+
+          .button.success {
+            background: var(--success);
+          }
+
+          .button.success:hover {
+            background: #0f6a42;
+          }
+
+          .button.danger,
+          .danger-zone button {
+            background: var(--danger);
+          }
+
+          .button.danger:hover,
+          .danger-zone button:hover {
+            background: #912018;
+          }
+
+          form.inline {
+            display: inline;
+          }
+
+          label {
+            display: block;
+            font-size: 14px;
+            font-weight: 700;
+            margin-bottom: 8px;
+          }
+
+          input[type="text"],
+          input[type="file"],
+          textarea,
+          select {
+            width: 100%;
+            min-height: 46px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px 14px;
+            font-size: 15px;
+            background: white;
+            color: var(--text);
+          }
+
+          textarea {
+            min-height: 140px;
+            resize: vertical;
+          }
+
+          input[type="text"]:focus,
+          input[type="file"]:focus,
+          textarea:focus,
+          select:focus {
+            outline: 3px solid rgba(36, 87, 255, 0.14);
+            border-color: var(--primary);
+          }
+
+          .field {
+            margin-bottom: 16px;
+          }
+
+          .field-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+          }
+
+          .search-shell {
+            max-width: 760px;
+            margin: 0 auto;
+          }
+
+          .search-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            box-shadow: var(--shadow);
+            padding: 28px;
+          }
+
+          .search-card h1 {
+            margin: 0 0 10px;
+            font-size: 34px;
+            letter-spacing: -0.03em;
+          }
+
+          .search-form {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+          }
+
+          .search-form input[type="text"] {
+            flex: 1 1 280px;
+          }
+
+          .results-list {
+            display: grid;
+            gap: 14px;
+            margin-top: 18px;
+          }
+
+          .result-card {
+            padding: 18px;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: #fbfcff;
+          }
+
+          .result-card h3 {
+            margin: 0 0 8px;
+            font-size: 19px;
+          }
+
+          .table-wrap {
+            overflow-x: auto;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: white;
+          }
+
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+          }
+
+          th, td {
+            text-align: left;
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border);
+            vertical-align: top;
+            font-size: 14px;
+          }
+
+          th {
+            font-size: 13px;
+            color: var(--muted);
+            background: #f8faff;
+            font-weight: 800;
+            letter-spacing: 0.01em;
+          }
+
+          tr:last-child td {
+            border-bottom: none;
+          }
+
+          .event-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 14px;
+          }
+
+          .event-card-title {
+            margin: 0;
+            font-size: 22px;
+            letter-spacing: -0.02em;
+          }
+
+          .event-meta {
+            display: grid;
+            gap: 8px;
+            margin-top: 12px;
+            font-size: 14px;
+            color: var(--muted);
+          }
+
+          .code-line {
+            display: inline-block;
+            background: #f4f7ff;
+            border: 1px solid var(--border);
+            color: #29416e;
+            border-radius: 10px;
+            padding: 6px 10px;
+            font-size: 13px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+          }
+
+          .empty-state {
+            text-align: center;
+            padding: 40px 24px;
+            border: 1px dashed var(--border);
+            border-radius: 18px;
+            color: var(--muted);
+            background: rgba(255,255,255,0.7);
+          }
+
+          .notice {
+            border-radius: 14px;
+            padding: 14px 16px;
+            margin-bottom: 16px;
+            font-size: 14px;
+          }
+
+          .notice.info {
+            background: #eef4ff;
+            color: #29416e;
+            border: 1px solid #cfe0ff;
+          }
+
+          .notice.warning {
+            background: var(--warning-bg);
+            color: var(--warning);
+            border: 1px solid #f2d38a;
+          }
+
+          .notice.danger {
+            background: var(--danger-bg);
+            color: var(--danger);
+            border: 1px solid #f7c9c5;
+          }
+
+          .danger-zone {
+            border: 1px solid #f3c6c3;
+            background: #fff8f7;
+            border-radius: 18px;
+            padding: 18px;
+          }
+
+          .top-nav {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+          }
+
+          .top-nav a {
+            display: inline-flex;
+            align-items: center;
+            min-height: 38px;
+            padding: 0 12px;
+            border-radius: 999px;
+            background: white;
+            border: 1px solid var(--border);
+            color: var(--text);
+            font-size: 14px;
+            font-weight: 700;
+          }
+
+          .top-nav a:hover {
+            background: #f8faff;
+            text-decoration: none;
+          }
+
+          .footer-link {
+            margin-top: 18px;
+            font-size: 14px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="${fullWidth}">
+          ${body}
+        </div>
+      </body>
+    </html>
   `;
 }
 
-function mappingSelect(name, headers) {
+function renderTopNav(links = []) {
   return `
-    <select name="${name}">
-      <option value="">-- Ignore --</option>
-      ${headers.map((header, index) => `
-        <option value="${index}">${escapeHtml(header)}</option>
+    <div class="top-nav">
+      ${links.map(link => `
+        <a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>
       `).join('')}
-    </select>
+    </div>
   `;
 }
 
@@ -159,71 +636,100 @@ function renderSearchPage(event, q, results) {
   const resultsHtml = q
     ? results.length > 0
       ? `
-        <h2>Results for "${escapeHtml(q)}"</h2>
-        <ul>
+        <div class="results-list">
           ${results.map(row => `
-            <li style="margin-bottom: 16px;">
-              <strong>${escapeHtml(row.full_name || 'No name')}</strong><br/>
-              Company: ${escapeHtml(row.company || 'N/A')}<br/>
-              Table: ${escapeHtml(row.table_name || 'N/A')}<br/>
-              Seat: ${escapeHtml(row.seat || 'N/A')}
-            </li>
+            <div class="result-card">
+              <h3>${escapeHtml(row.full_name || 'No name')}</h3>
+              <div class="muted">${escapeHtml(row.company || 'No company')}</div>
+              <div style="margin-top: 10px;"><strong>Table:</strong> ${escapeHtml(row.table_name || 'Not assigned')}</div>
+            </div>
           `).join('')}
-        </ul>
+        </div>
       `
       : `
-        <h2>Results for "${escapeHtml(q)}"</h2>
-        <p>No results found.</p>
+        <div class="empty-state" style="margin-top: 18px;">
+          No results found for <strong>${escapeHtml(q)}</strong>.
+        </div>
       `
     : `
-      <p>Search by guest name or company.</p>
+      <div class="notice info" style="margin-top: 18px;">
+        Search by guest name or company.
+      </div>
     `;
 
-  return `
-    <html>
-      <head>
-        <title>${escapeHtml(event.name)}</title>
-      </head>
-      <body>
-        <h1>${escapeHtml(event.name)}</h1>
+  return renderLayout(
+    event.name,
+    `
+      <div class="search-shell">
+        <div class="search-card">
+          <div class="muted small" style="margin-bottom: 8px;">Guest seating lookup</div>
+          <h1>${escapeHtml(event.name)}</h1>
+          <p class="muted" style="margin: 0 0 8px;">
+            Search your name or company to find your assigned table.
+          </p>
 
-        <form method="GET" action="/e/${encodeURIComponent(event.public_token)}">
-          <input
-            type="text"
-            name="q"
-            placeholder="Enter name or company"
-            value="${escapeHtml(q)}"
-          />
-          <button type="submit">Search</button>
-        </form>
+          <form method="GET" action="/e/${encodeURIComponent(event.public_token)}" class="search-form">
+            <input
+              type="text"
+              name="q"
+              placeholder="Enter guest name or company"
+              value="${escapeHtml(q)}"
+              autofocus
+            />
+            <button type="submit">Search</button>
+          </form>
 
-        ${resultsHtml}
-
-        <p><a href="/">Home</a></p>
-      </body>
-    </html>
-  `;
+          ${resultsHtml}
+        </div>
+      </div>
+    `
+  );
 }
 
 app.get('/', (req, res) => {
-  res.send(`
-    <html>
-      <head>
-        <title>Guest Seating Lookup</title>
-      </head>
-      <body>
-        <h1>Guest Seating Lookup</h1>
-        <p>Backend is running.</p>
+  res.send(
+    renderLayout(
+      'Guest Seating Lookup',
+      `
+        <div class="hero">
+          <div>
+            <h1>Guest Seating Lookup</h1>
+            <p>
+              Upload event guest lists, map columns from CSV or Excel files, publish events,
+              and let guests search their table assignment through a public event link.
+            </p>
+          </div>
+        </div>
 
-        <ul>
-          <li><a href="/admin/events">Admin Events</a></li>
-          <li><a href="/health">Health</a></li>
-          <li><a href="/setup">Setup / Update Database</a></li>
-          <li><a href="/admin/purge">Purge Database</a></li>
-        </ul>
-      </body>
-    </html>
-  `);
+        <div class="grid cards">
+          <div class="card">
+            <h2>Admin</h2>
+            <p class="muted">Create events, upload guest files, publish when ready, and manage imports.</p>
+            <div class="actions">
+              <a class="button" href="/admin/events">Open Admin</a>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>System Status</h2>
+            <p class="muted">Check database connectivity and basic app health.</p>
+            <div class="actions">
+              <a class="button secondary" href="/health">Health Check</a>
+              <a class="button secondary" href="/setup">Setup / Update DB</a>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Reset Data</h2>
+            <p class="muted">Clear all events and guests when you want a clean test environment.</p>
+            <div class="actions">
+              <a class="button danger" href="/admin/purge">Purge Database</a>
+            </div>
+          </div>
+        </div>
+      `
+    )
+  );
 });
 
 app.get('/search', async (req, res) => {
@@ -231,17 +737,18 @@ app.get('/search', async (req, res) => {
   const q = (req.query.q || '').trim();
 
   if (!token) {
-    return res.send(`
-      <html>
-        <head><title>Search</title></head>
-        <body>
-          <h1>Guest Search</h1>
-          <p>Missing event token.</p>
-          <p>Use a link like: <code>/e/abc12345</code></p>
-          <p><a href="/">Home</a></p>
-        </body>
-      </html>
-    `);
+    return res.send(
+      renderLayout(
+        'Missing Event',
+        `
+          ${renderTopNav([{ href: '/', label: 'Home' }])}
+          <div class="panel">
+            <h1>Missing event token</h1>
+            <p class="muted">Use a link like <span class="code-line">/e/abc12345</span>.</p>
+          </div>
+        `
+      )
+    );
   }
 
   return res.redirect(`/e/${encodeURIComponent(token)}${q ? `?q=${encodeURIComponent(q)}` : ''}`);
@@ -263,16 +770,22 @@ app.get('/e/:token', async (req, res) => {
     );
 
     if (eventResult.rows.length === 0) {
-      return res.send(`
-        <html>
-          <head><title>Search</title></head>
-          <body>
-            <h1>Guest Search</h1>
-            <p>Event not found or not published yet.</p>
-            <p><a href="/">Home</a></p>
-          </body>
-        </html>
-      `);
+      return res.send(
+        renderLayout(
+          'Event Not Available',
+          `
+            <div class="search-shell">
+              <div class="search-card">
+                <h1>Event not found</h1>
+                <p class="muted">This event does not exist or has not been published yet.</p>
+                <div class="actions">
+                  <a class="button secondary" href="/">Home</a>
+                </div>
+              </div>
+            </div>
+          `
+        )
+      );
     }
 
     const event = eventResult.rows[0];
@@ -281,7 +794,7 @@ app.get('/e/:token', async (req, res) => {
     if (q) {
       const dbResult = await pool.query(
         `
-        SELECT full_name, company, table_name, seat
+        SELECT full_name, company, table_name
         FROM guests
         WHERE event_id = $1
           AND (
@@ -299,16 +812,18 @@ app.get('/e/:token', async (req, res) => {
 
     res.send(renderSearchPage(event, q, results));
   } catch (err) {
-    res.status(500).send(`
-      <html>
-        <head><title>Search Error</title></head>
-        <body>
-          <h1>Search Error</h1>
-          <p>${escapeHtml(err.message)}</p>
-          <p><a href="/">Home</a></p>
-        </body>
-      </html>
-    `);
+    res.status(500).send(
+      renderLayout(
+        'Search Error',
+        `
+          <div class="panel">
+            <h1>Search Error</h1>
+            <div class="notice danger">${escapeHtml(err.message)}</div>
+            <a class="button secondary" href="/">Home</a>
+          </div>
+        `
+      )
+    );
   }
 });
 
@@ -339,7 +854,7 @@ app.get('/api/search', async (req, res) => {
 
     const dbResult = await pool.query(
       `
-      SELECT full_name, company, table_name, seat
+      SELECT full_name, company, table_name
       FROM guests
       WHERE event_id = $1
         AND (
@@ -385,69 +900,111 @@ app.get('/admin/events', async (req, res) => {
       `
     );
 
-    res.send(`
-      <html>
-        <head>
-          <title>Admin Events</title>
-        </head>
-        <body>
+    const body = `
+      ${renderTopNav([
+        { href: '/', label: 'Home' },
+        { href: '/admin/purge', label: 'Purge Database' }
+      ])}
+
+      <div class="hero">
+        <div>
           <h1>Events</h1>
+          <p>Create events, upload guest files, publish when ready, and manage each event from one place.</p>
+        </div>
+        <div class="actions" style="margin-top: 0;">
+          <a class="button" href="/admin/events/new">Create Event</a>
+        </div>
+      </div>
 
-          <p><a href="/admin/events/new">Create Event</a></p>
-          <p><a href="/admin/purge">Purge Database</a></p>
+      ${
+        result.rows.length
+          ? `<div class="grid cards">
+              ${result.rows.map(e => `
+                <div class="card">
+                  <div class="event-card-header">
+                    <div>
+                      <h2 class="event-card-title">${escapeHtml(e.name || 'Untitled Event')}</h2>
+                      <div class="muted small" style="margin-top: 6px;">
+                        <span class="code-line">${escapeHtml(e.public_token || '')}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <span class="badge ${e.is_published ? 'published' : 'draft'}">
+                        ${e.is_published ? 'Published' : 'Draft'}
+                      </span>
+                    </div>
+                  </div>
 
-          <ul>
-            ${result.rows.map(e => `
-              <li style="margin-bottom: 24px;">
-                <strong>${escapeHtml(e.name || 'Untitled Event')}</strong><br/>
-                Token: ${escapeHtml(e.public_token || '(missing)')}<br/>
-                Status: ${e.is_published ? 'Published' : 'Draft'}<br/>
-                Guests: ${e.guest_count}<br/>
-                Last Import File: ${escapeHtml(e.last_import_file_name || 'None')}<br/>
-                Last Import Time: ${escapeHtml(formatDateTime(e.last_imported_at))}<br/>
-                Public URL: <a href="/e/${encodeURIComponent(e.public_token || '')}">/e/${escapeHtml(e.public_token || '')}</a><br/>
-                <a href="/admin/events/${encodeURIComponent(e.public_token || '')}">Event Details</a><br/>
-                <a href="/e/${encodeURIComponent(e.public_token || '')}">View Search</a><br/>
-                <a href="/admin/events/${encodeURIComponent(e.public_token || '')}/upload">Upload Guest File</a><br/>
-                ${e.is_published
-                  ? `<a href="/admin/events/${encodeURIComponent(e.public_token || '')}/unpublish">Unpublish</a>`
-                  : `<a href="/admin/events/${encodeURIComponent(e.public_token || '')}/publish">Publish</a>`
-                }
-              </li>
-            `).join('')}
-          </ul>
+                  <div class="stats">
+                    <div class="stat">
+                      <div class="stat-label">Guests</div>
+                      <div class="stat-value">${e.guest_count}</div>
+                    </div>
+                    <div class="stat">
+                      <div class="stat-label">Last Import</div>
+                      <div class="small">${escapeHtml(e.last_import_file_name || 'None')}</div>
+                    </div>
+                  </div>
 
-          <p><a href="/">Home</a></p>
-        </body>
-      </html>
-    `);
+                  <div class="event-meta">
+                    <div>Public URL: <a href="/e/${encodeURIComponent(e.public_token || '')}">/e/${escapeHtml(e.public_token || '')}</a></div>
+                    <div>Updated: ${escapeHtml(formatDateTime(e.last_imported_at))}</div>
+                  </div>
+
+                  <div class="actions">
+                    <a class="button secondary" href="/admin/events/${encodeURIComponent(e.public_token || '')}">Manage</a>
+                    <a class="button secondary" href="/e/${encodeURIComponent(e.public_token || '')}">View Search</a>
+                    <a class="button secondary" href="/admin/events/${encodeURIComponent(e.public_token || '')}/upload">Upload File</a>
+                  </div>
+                </div>
+              `).join('')}
+            </div>`
+          : `
+            <div class="empty-state">
+              <h2 style="margin-top: 0;">No events yet</h2>
+              <p>Create your first event to start importing guest lists and publishing search pages.</p>
+              <div class="actions" style="justify-content: center;">
+                <a class="button" href="/admin/events/new">Create Event</a>
+              </div>
+            </div>
+          `
+      }
+    `;
+
+    res.send(renderLayout('Admin Events', body));
   } catch (err) {
-    res.status(500).send(escapeHtml(err.message));
+    res.status(500).send(renderLayout('Error', `<div class="notice danger">${escapeHtml(err.message)}</div>`));
   }
 });
 
 app.get('/admin/events/new', (req, res) => {
-  res.send(`
-    <html>
-      <head>
-        <title>Create Event</title>
-      </head>
-      <body>
-        <h1>Create Event</h1>
+  res.send(
+    renderLayout(
+      'Create Event',
+      `
+        ${renderTopNav([
+          { href: '/admin/events', label: 'Back to Events' }
+        ])}
 
-        <form method="POST" action="/admin/events/new">
-          <p>
-            <input name="name" placeholder="Event name" required />
-          </p>
-          <p>
-            <button type="submit">Create Event</button>
-          </p>
-        </form>
+        <div class="panel" style="max-width: 720px; margin: 0 auto;">
+          <h1 style="margin-top: 0;">Create Event</h1>
+          <p class="muted">Create a new event workspace and generate its public token automatically.</p>
 
-        <p><a href="/admin/events">Back to Events</a></p>
-      </body>
-    </html>
-  `);
+          <form method="POST" action="/admin/events/new">
+            <div class="field">
+              <label for="name">Event Name</label>
+              <input id="name" name="name" placeholder="Example: Annual Gala 2026" required />
+            </div>
+
+            <div class="actions">
+              <button type="submit">Create Event</button>
+              <a class="button secondary" href="/admin/events">Cancel</a>
+            </div>
+          </form>
+        </div>
+      `
+    )
+  );
 });
 
 app.post('/admin/events/new', async (req, res) => {
@@ -481,7 +1038,7 @@ app.post('/admin/events/new', async (req, res) => {
       [name, token]
     );
 
-    res.redirect('/admin/events');
+    res.redirect(`/admin/events/${encodeURIComponent(token)}`);
   } catch (err) {
     res.status(500).send(escapeHtml(err.message));
   }
@@ -494,71 +1051,128 @@ app.get('/admin/events/:token', async (req, res) => {
     const event = await getEventByToken(token);
 
     if (!event) {
-      return res.status(404).send('Event not found');
+      return res.status(404).send(renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`));
     }
 
     const recentGuestsResult = await pool.query(
       `
-      SELECT full_name, company, table_name, seat
+      SELECT full_name, company, table_name
       FROM guests
       WHERE event_id = $1
       ORDER BY id ASC
-      LIMIT 10
+      LIMIT 12
       `,
       [event.id]
     );
 
-    res.send(`
-      <html>
-        <head>
-          <title>Event Details</title>
-        </head>
-        <body>
+    const body = `
+      ${renderTopNav([
+        { href: '/admin/events', label: 'Back to Events' },
+        { href: `/e/${event.public_token}`, label: 'Open Public Search' }
+      ])}
+
+      <div class="hero">
+        <div>
           <h1>${escapeHtml(event.name)}</h1>
+          <p>Manage event status, upload a new guest list, and monitor what is currently live.</p>
+        </div>
+        <div>
+          <span class="badge ${event.is_published ? 'published' : 'draft'}">
+            ${event.is_published ? 'Published' : 'Draft'}
+          </span>
+        </div>
+      </div>
 
-          <p>Token: ${escapeHtml(event.public_token)}</p>
-          <p>Status: ${event.is_published ? 'Published' : 'Draft'}</p>
-          <p>Guests: ${event.guest_count}</p>
-          <p>Last Import File: ${escapeHtml(event.last_import_file_name || 'None')}</p>
-          <p>Last Import Time: ${escapeHtml(formatDateTime(event.last_imported_at))}</p>
-          <p>Public URL: <a href="/e/${encodeURIComponent(event.public_token)}">/e/${escapeHtml(event.public_token)}</a></p>
+      <div class="grid two">
+        <div>
+          <div class="panel">
+            <h2>Overview</h2>
 
-          <p><a href="/admin/events/${encodeURIComponent(event.public_token)}/upload">Upload Guest File</a></p>
+            <div class="stats">
+              <div class="stat">
+                <div class="stat-label">Guest Count</div>
+                <div class="stat-value">${event.guest_count}</div>
+              </div>
+              <div class="stat">
+                <div class="stat-label">Public Token</div>
+                <div class="small"><span class="code-line">${escapeHtml(event.public_token)}</span></div>
+              </div>
+              <div class="stat">
+                <div class="stat-label">Last Import</div>
+                <div class="small">${escapeHtml(formatDateTime(event.last_imported_at))}</div>
+              </div>
+            </div>
 
-          <p>
-            ${event.is_published
-              ? `<a href="/admin/events/${encodeURIComponent(event.public_token)}/unpublish">Unpublish Event</a>`
-              : `<a href="/admin/events/${encodeURIComponent(event.public_token)}/publish">Publish Event</a>`
+            <div class="event-meta" style="margin-top: 18px;">
+              <div>Last Import File: ${escapeHtml(event.last_import_file_name || 'None')}</div>
+              <div>Public URL: <a href="/e/${encodeURIComponent(event.public_token)}">/e/${escapeHtml(event.public_token)}</a></div>
+            </div>
+
+            <div class="actions">
+              <a class="button" href="/admin/events/${encodeURIComponent(event.public_token)}/upload">Upload Guest File</a>
+              ${
+                event.is_published
+                  ? `<a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/unpublish">Unpublish</a>`
+                  : `<a class="button success" href="/admin/events/${encodeURIComponent(event.public_token)}/publish">Publish</a>`
+              }
+            </div>
+          </div>
+
+          <div class="panel">
+            <h2>Guest Preview</h2>
+            ${
+              recentGuestsResult.rows.length
+                ? `
+                  <div class="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Name</th>
+                          <th>Company</th>
+                          <th>Table</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${recentGuestsResult.rows.map(row => `
+                          <tr>
+                            <td>${escapeHtml(row.full_name || '')}</td>
+                            <td>${escapeHtml(row.company || '')}</td>
+                            <td>${escapeHtml(row.table_name || '')}</td>
+                          </tr>
+                        `).join('')}
+                      </tbody>
+                    </table>
+                  </div>
+                `
+                : `<div class="empty-state">No guests imported yet.</div>`
             }
-          </p>
+          </div>
+        </div>
 
-          <p><a href="/admin/events/${encodeURIComponent(event.public_token)}/clear">Clear Guest List</a></p>
-          <p><a href="/admin/events/${encodeURIComponent(event.public_token)}/delete">Delete Event</a></p>
+        <div>
+          <div class="panel">
+            <h2>Actions</h2>
+            <div class="actions">
+              <a class="button secondary" href="/e/${encodeURIComponent(event.public_token)}">View Search</a>
+              <a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/upload">Upload File</a>
+            </div>
+          </div>
 
-          <h2>Guest Preview</h2>
-          ${
-            recentGuestsResult.rows.length
-              ? `
-                <ul>
-                  ${recentGuestsResult.rows.map(row => `
-                    <li style="margin-bottom: 12px;">
-                      <strong>${escapeHtml(row.full_name || 'No name')}</strong><br/>
-                      Company: ${escapeHtml(row.company || 'N/A')}<br/>
-                      Table: ${escapeHtml(row.table_name || 'N/A')}<br/>
-                      Seat: ${escapeHtml(row.seat || 'N/A')}
-                    </li>
-                  `).join('')}
-                </ul>
-              `
-              : `<p>No guests imported yet.</p>`
-          }
+          <div class="danger-zone">
+            <h3 style="margin-top: 0;">Danger Zone</h3>
+            <p class="muted">These actions change or remove data for this event.</p>
+            <div class="actions">
+              <a class="button danger" href="/admin/events/${encodeURIComponent(event.public_token)}/clear">Clear Guest List</a>
+              <a class="button danger" href="/admin/events/${encodeURIComponent(event.public_token)}/delete">Delete Event</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
 
-          <p><a href="/admin/events">Back to Events</a></p>
-        </body>
-      </html>
-    `);
+    res.send(renderLayout(`Manage ${event.name}`, body, { fullWidth: true }));
   } catch (err) {
-    res.status(500).send(escapeHtml(err.message));
+    res.status(500).send(renderLayout('Error', `<div class="notice danger">${escapeHtml(err.message)}</div>`));
   }
 });
 
@@ -569,40 +1183,55 @@ app.get('/admin/events/:token/upload', async (req, res) => {
     const event = await getEventByToken(token);
 
     if (!event) {
-      return res.status(404).send('Event not found');
+      return res.status(404).send(renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`));
     }
 
-    res.send(`
-      <html>
-        <head>
-          <title>Upload Guest File</title>
-        </head>
-        <body>
-          <h1>Upload Guest File</h1>
-          <p>Event: <strong>${escapeHtml(event.name)}</strong></p>
-          <p>Current Guests: ${event.guest_count}</p>
+    const body = `
+      ${renderTopNav([
+        { href: `/admin/events/${event.public_token}`, label: 'Back to Event' },
+        { href: '/admin/events', label: 'All Events' }
+      ])}
 
-          <p>Upload a CSV or Excel file.</p>
-          <p>This version uses the first sheet for Excel files.</p>
-          <p>Importing will replace the current guest list for this event.</p>
+      <div class="panel" style="max-width: 860px; margin: 0 auto;">
+        <h1 style="margin-top: 0;">Upload Guest File</h1>
+        <p class="muted">Event: <strong>${escapeHtml(event.name)}</strong></p>
 
-          <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/upload" enctype="multipart/form-data">
-            <input type="file" name="guestFile" accept=".csv,.xlsx,.xls" required />
+        <div class="notice info">
+          Upload a CSV or Excel file. The first sheet will be used for Excel files.
+          This import can either replace the current guest list or append to it.
+        </div>
+
+        <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/upload" enctype="multipart/form-data">
+          <div class="field">
+            <label for="guestFile">Guest File</label>
+            <input id="guestFile" type="file" name="guestFile" accept=".csv,.xlsx,.xls" required />
+          </div>
+
+          <div class="field">
+            <label for="importMode">Import Mode</label>
+            <select id="importMode" name="importMode">
+              <option value="replace">Replace existing guest list</option>
+              <option value="append">Append to existing guest list</option>
+            </select>
+          </div>
+
+          <div class="actions">
             <button type="submit">Upload and Preview</button>
-          </form>
+            <a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}">Cancel</a>
+          </div>
+        </form>
+      </div>
+    `;
 
-          <p><a href="/admin/events/${encodeURIComponent(event.public_token)}">Back to Event Details</a></p>
-          <p><a href="/admin/events">Back to Events</a></p>
-        </body>
-      </html>
-    `);
+    res.send(renderLayout(`Upload File - ${event.name}`, body));
   } catch (err) {
-    res.status(500).send(escapeHtml(err.message));
+    res.status(500).send(renderLayout('Error', `<div class="notice danger">${escapeHtml(err.message)}</div>`));
   }
 });
 
 app.post('/admin/events/:token/upload', upload.single('guestFile'), async (req, res) => {
   const token = req.params.token;
+  const importMode = (req.body.importMode || 'replace').trim() === 'append' ? 'append' : 'replace';
 
   try {
     const event = await getEventByToken(token);
@@ -627,6 +1256,18 @@ app.post('/admin/events/:token/upload', upload.single('guestFile'), async (req, 
 
     const uploadToken = generateUploadToken();
 
+    const defaultFullName = detectColumnIndex(parsed.headers, [
+      'full name', 'fullname', 'guest name', 'name', 'attendee'
+    ]);
+
+    const defaultCompany = detectColumnIndex(parsed.headers, [
+      'company', 'organisation', 'organization', 'business', 'employer'
+    ]);
+
+    const defaultTable = detectColumnIndex(parsed.headers, [
+      'table', 'table name', 'table number', 'table no'
+    ]);
+
     uploadSessions.set(uploadToken, {
       createdAt: Date.now(),
       eventId: event.id,
@@ -635,7 +1276,13 @@ app.post('/admin/events/:token/upload', upload.single('guestFile'), async (req, 
       originalName: parsed.originalName,
       sheetName: parsed.firstSheetName,
       headers: parsed.headers,
-      rows: parsed.rows
+      rows: parsed.rows,
+      importMode,
+      defaults: {
+        full_name: defaultFullName,
+        company: defaultCompany,
+        table_name: defaultTable
+      }
     });
 
     res.redirect(`/admin/uploads/${uploadToken}/map`);
@@ -652,53 +1299,78 @@ app.get('/admin/uploads/:uploadToken/map', (req, res) => {
     return res.status(404).send('Upload session not found. Upload the file again.');
   }
 
-  res.send(`
-    <html>
-      <head>
-        <title>Map Columns</title>
-      </head>
-      <body>
-        <h1>Map Columns</h1>
+  const defaults = session.defaults || {};
 
-        <p>Event: <strong>${escapeHtml(session.eventName)}</strong></p>
-        <p>File: ${escapeHtml(session.originalName)}</p>
-        <p>Sheet: ${escapeHtml(session.sheetName)}</p>
-        <p>Rows found: ${session.rows.length}</p>
+  function mappingSelectWithDefault(name, headers, defaultValue) {
+    return `
+      <select name="${name}">
+        <option value="">-- Ignore --</option>
+        ${headers.map((header, index) => `
+          <option value="${index}" ${String(defaultValue) === String(index) ? 'selected' : ''}>
+            ${escapeHtml(header)}
+          </option>
+        `).join('')}
+      </select>
+    `;
+  }
 
-        <h2>Choose which column maps to each field</h2>
+  const body = `
+    ${renderTopNav([
+      { href: `/admin/events/${session.eventToken}/upload`, label: 'Back to Upload' },
+      { href: `/admin/events/${session.eventToken}`, label: 'Event Details' }
+    ])}
+
+    <div class="grid two">
+      <div class="panel">
+        <h1 style="margin-top: 0;">Map Columns</h1>
+
+        <div class="event-meta" style="margin-bottom: 18px;">
+          <div>Event: ${escapeHtml(session.eventName)}</div>
+          <div>File: ${escapeHtml(session.originalName)}</div>
+          <div>Sheet: ${escapeHtml(session.sheetName)}</div>
+          <div>Rows Found: ${session.rows.length}</div>
+          <div>Import Mode: ${escapeHtml(session.importMode === 'append' ? 'Append' : 'Replace')}</div>
+        </div>
 
         <form method="POST" action="/admin/uploads/${uploadToken}/import">
-          <p>
-            Full Name<br/>
-            ${mappingSelect('full_name', session.headers)}
-          </p>
+          <div class="field-row">
+            <div class="field">
+              <label>Full Name</label>
+              ${mappingSelectWithDefault('full_name', session.headers, defaults.full_name)}
+            </div>
 
-          <p>
-            Company<br/>
-            ${mappingSelect('company', session.headers)}
-          </p>
+            <div class="field">
+              <label>Company</label>
+              ${mappingSelectWithDefault('company', session.headers, defaults.company)}
+            </div>
 
-          <p>
-            Table Name<br/>
-            ${mappingSelect('table_name', session.headers)}
-          </p>
+            <div class="field">
+              <label>Table</label>
+              ${mappingSelectWithDefault('table_name', session.headers, defaults.table_name)}
+            </div>
+          </div>
 
-          <p>
-            Seat<br/>
-            ${mappingSelect('seat', session.headers)}
-          </p>
+          <div class="notice info">
+            Full Name is required. Company and Table are optional.
+          </div>
 
-          <button type="submit">Replace Guests and Import</button>
+          <div class="actions">
+            <button type="submit">${session.importMode === 'append' ? 'Append Guests' : 'Replace Guests and Import'}</button>
+            <a class="button secondary" href="/admin/events/${encodeURIComponent(session.eventToken)}/upload">Cancel</a>
+          </div>
         </form>
+      </div>
 
-        <h2>Preview</h2>
-        ${renderPreviewTable(session.headers, session.rows, 10)}
+      <div class="panel">
+        <h2 style="margin-top: 0;">Preview</h2>
+        <div class="table-wrap">
+          ${renderPreviewTable(session.headers, session.rows, 10)}
+        </div>
+      </div>
+    </div>
+  `;
 
-        <p><a href="/admin/events/${encodeURIComponent(session.eventToken)}/upload">Upload a different file</a></p>
-        <p><a href="/admin/events">Back to Events</a></p>
-      </body>
-    </html>
-  `);
+  res.send(renderLayout('Map Columns', body, { fullWidth: true }));
 });
 
 app.post('/admin/uploads/:uploadToken/import', async (req, res) => {
@@ -712,7 +1384,6 @@ app.post('/admin/uploads/:uploadToken/import', async (req, res) => {
   const fullNameIndex = req.body.full_name;
   const companyIndex = req.body.company;
   const tableNameIndex = req.body.table_name;
-  const seatIndex = req.body.seat;
 
   if (fullNameIndex === '' || fullNameIndex === undefined) {
     return res.status(400).send('You must map a Full Name column.');
@@ -721,10 +1392,12 @@ app.post('/admin/uploads/:uploadToken/import', async (req, res) => {
   try {
     await pool.query('BEGIN');
 
-    await pool.query(
-      `DELETE FROM guests WHERE event_id = $1`,
-      [session.eventId]
-    );
+    if (session.importMode === 'replace') {
+      await pool.query(
+        `DELETE FROM guests WHERE event_id = $1`,
+        [session.eventId]
+      );
+    }
 
     let imported = 0;
 
@@ -732,7 +1405,6 @@ app.post('/admin/uploads/:uploadToken/import', async (req, res) => {
       const full_name = normalizeCell(row[Number(fullNameIndex)]);
       const company = companyIndex === '' ? '' : normalizeCell(row[Number(companyIndex)]);
       const table_name = tableNameIndex === '' ? '' : normalizeCell(row[Number(tableNameIndex)]);
-      const seat = seatIndex === '' ? '' : normalizeCell(row[Number(seatIndex)]);
 
       if (!full_name) {
         continue;
@@ -740,10 +1412,10 @@ app.post('/admin/uploads/:uploadToken/import', async (req, res) => {
 
       await pool.query(
         `
-        INSERT INTO guests (event_id, full_name, company, table_name, seat)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO guests (event_id, full_name, company, table_name)
+        VALUES ($1, $2, $3, $4)
         `,
-        [session.eventId, full_name, company, table_name, seat]
+        [session.eventId, full_name, company, table_name]
       );
 
       imported += 1;
@@ -763,20 +1435,28 @@ app.post('/admin/uploads/:uploadToken/import', async (req, res) => {
     await pool.query('COMMIT');
     uploadSessions.delete(uploadToken);
 
-    res.send(`
-      <html>
-        <head>
-          <title>Import Complete</title>
-        </head>
-        <body>
-          <h1>Import Complete</h1>
-          <p>Replaced guest list and imported ${imported} guests into ${escapeHtml(session.eventName)}.</p>
-          <p><a href="/admin/events/${encodeURIComponent(session.eventToken)}">Back to Event Details</a></p>
-          <p><a href="/e/${encodeURIComponent(session.eventToken)}">Open Public Search</a></p>
-          <p><a href="/admin/events">Back to Events</a></p>
-        </body>
-      </html>
-    `);
+    res.send(
+      renderLayout(
+        'Import Complete',
+        `
+          <div class="panel" style="max-width: 760px; margin: 0 auto;">
+            <h1 style="margin-top: 0;">Import Complete</h1>
+            <p class="muted">
+              ${
+                session.importMode === 'append'
+                  ? `Appended ${imported} guests`
+                  : `Replaced guest list and imported ${imported} guests`
+              } into <strong>${escapeHtml(session.eventName)}</strong>.
+            </p>
+
+            <div class="actions">
+              <a class="button" href="/admin/events/${encodeURIComponent(session.eventToken)}">Back to Event</a>
+              <a class="button secondary" href="/e/${encodeURIComponent(session.eventToken)}">Open Public Search</a>
+            </div>
+          </div>
+        `
+      )
+    );
   } catch (err) {
     try {
       await pool.query('ROLLBACK');
@@ -799,17 +1479,20 @@ app.get('/admin/events/:token/publish', async (req, res) => {
     }
 
     if (event.guest_count < 1) {
-      return res.status(400).send(`
-        <html>
-          <head><title>Cannot Publish</title></head>
-          <body>
-            <h1>Cannot Publish</h1>
-            <p>This event has no guests yet.</p>
-            <p><a href="/admin/events/${encodeURIComponent(token)}">Back to Event Details</a></p>
-            <p><a href="/admin/events">Back to Events</a></p>
-          </body>
-        </html>
-      `);
+      return res.status(400).send(
+        renderLayout(
+          'Cannot Publish',
+          `
+            <div class="panel" style="max-width: 720px; margin: 0 auto;">
+              <h1 style="margin-top: 0;">Cannot Publish</h1>
+              <div class="notice warning">This event has no guests yet.</div>
+              <div class="actions">
+                <a class="button secondary" href="/admin/events/${encodeURIComponent(token)}">Back to Event</a>
+              </div>
+            </div>
+          `
+        )
+      );
     }
 
     await pool.query(
@@ -856,28 +1539,31 @@ app.get('/admin/events/:token/clear', async (req, res) => {
       return res.status(404).send('Event not found');
     }
 
-    res.send(`
-      <html>
-        <head>
-          <title>Clear Guest List</title>
-        </head>
-        <body>
-          <h1>Clear Guest List</h1>
+    res.send(
+      renderLayout(
+        'Clear Guest List',
+        `
+          <div class="panel" style="max-width: 760px; margin: 0 auto;">
+            <h1 style="margin-top: 0;">Clear Guest List</h1>
+            <p class="muted">Event: <strong>${escapeHtml(event.name)}</strong></p>
+            <div class="notice danger">
+              This will delete all guests for this event and set it back to Draft.
+            </div>
 
-          <p>Event: <strong>${escapeHtml(event.name)}</strong></p>
-          <p>Current Guests: ${event.guest_count}</p>
-          <p>This will delete all guests for this event only.</p>
-
-          <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/clear">
-            <p>Type <strong>CLEAR</strong> to confirm:</p>
-            <input name="confirmText" />
-            <button type="submit">Clear Guest List</button>
-          </form>
-
-          <p><a href="/admin/events/${encodeURIComponent(event.public_token)}">Back to Event Details</a></p>
-        </body>
-      </html>
-    `);
+            <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/clear">
+              <div class="field">
+                <label>Type CLEAR to confirm</label>
+                <input name="confirmText" />
+              </div>
+              <div class="actions">
+                <button class="danger" type="submit">Clear Guest List</button>
+                <a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}">Cancel</a>
+              </div>
+            </form>
+          </div>
+        `
+      )
+    );
   } catch (err) {
     res.status(500).send(escapeHtml(err.message));
   }
@@ -916,19 +1602,20 @@ app.post('/admin/events/:token/clear', async (req, res) => {
 
     await pool.query('COMMIT');
 
-    res.send(`
-      <html>
-        <head>
-          <title>Guest List Cleared</title>
-        </head>
-        <body>
-          <h1>Guest List Cleared</h1>
-          <p>All guests for ${escapeHtml(event.name)} were removed.</p>
-          <p>The event was also set back to Draft.</p>
-          <p><a href="/admin/events/${encodeURIComponent(event.public_token)}">Back to Event Details</a></p>
-        </body>
-      </html>
-    `);
+    res.send(
+      renderLayout(
+        'Guest List Cleared',
+        `
+          <div class="panel" style="max-width: 760px; margin: 0 auto;">
+            <h1 style="margin-top: 0;">Guest List Cleared</h1>
+            <p class="muted">All guests for <strong>${escapeHtml(event.name)}</strong> were removed and the event is now Draft.</p>
+            <div class="actions">
+              <a class="button" href="/admin/events/${encodeURIComponent(event.public_token)}">Back to Event</a>
+            </div>
+          </div>
+        `
+      )
+    );
   } catch (err) {
     try {
       await pool.query('ROLLBACK');
@@ -950,28 +1637,31 @@ app.get('/admin/events/:token/delete', async (req, res) => {
       return res.status(404).send('Event not found');
     }
 
-    res.send(`
-      <html>
-        <head>
-          <title>Delete Event</title>
-        </head>
-        <body>
-          <h1>Delete Event</h1>
+    res.send(
+      renderLayout(
+        'Delete Event',
+        `
+          <div class="panel" style="max-width: 760px; margin: 0 auto;">
+            <h1 style="margin-top: 0;">Delete Event</h1>
+            <p class="muted">Event: <strong>${escapeHtml(event.name)}</strong></p>
+            <div class="notice danger">
+              This will permanently delete the event and all associated guests.
+            </div>
 
-          <p>Event: <strong>${escapeHtml(event.name)}</strong></p>
-          <p>Guests: ${event.guest_count}</p>
-          <p>This will delete the event and all its guests.</p>
-
-          <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/delete">
-            <p>Type <strong>DELETE</strong> to confirm:</p>
-            <input name="confirmText" />
-            <button type="submit">Delete Event</button>
-          </form>
-
-          <p><a href="/admin/events/${encodeURIComponent(event.public_token)}">Back to Event Details</a></p>
-        </body>
-      </html>
-    `);
+            <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/delete">
+              <div class="field">
+                <label>Type DELETE to confirm</label>
+                <input name="confirmText" />
+              </div>
+              <div class="actions">
+                <button class="danger" type="submit">Delete Event</button>
+                <a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}">Cancel</a>
+              </div>
+            </form>
+          </div>
+        `
+      )
+    );
   } catch (err) {
     res.status(500).send(escapeHtml(err.message));
   }
@@ -997,18 +1687,20 @@ app.post('/admin/events/:token/delete', async (req, res) => {
     await pool.query(`DELETE FROM events WHERE id = $1`, [event.id]);
     await pool.query('COMMIT');
 
-    res.send(`
-      <html>
-        <head>
-          <title>Event Deleted</title>
-        </head>
-        <body>
-          <h1>Event Deleted</h1>
-          <p>${escapeHtml(event.name)} and all associated guests were deleted.</p>
-          <p><a href="/admin/events">Back to Events</a></p>
-        </body>
-      </html>
-    `);
+    res.send(
+      renderLayout(
+        'Event Deleted',
+        `
+          <div class="panel" style="max-width: 760px; margin: 0 auto;">
+            <h1 style="margin-top: 0;">Event Deleted</h1>
+            <p class="muted"><strong>${escapeHtml(event.name)}</strong> and all its guests were deleted.</p>
+            <div class="actions">
+              <a class="button" href="/admin/events">Back to Events</a>
+            </div>
+          </div>
+        `
+      )
+    );
   } catch (err) {
     try {
       await pool.query('ROLLBACK');
@@ -1028,28 +1720,43 @@ app.get('/admin/purge', async (req, res) => {
     const eventCount = eventCountResult.rows[0].count;
     const guestCount = guestCountResult.rows[0].count;
 
-    res.send(`
-      <html>
-        <head>
-          <title>Purge Database</title>
-        </head>
-        <body>
-          <h1>Purge Database</h1>
+    res.send(
+      renderLayout(
+        'Purge Database',
+        `
+          ${renderTopNav([{ href: '/admin/events', label: 'Back to Events' }])}
 
-          <p>This will delete all events and all guests.</p>
-          <p>Events: ${eventCount}</p>
-          <p>Guests: ${guestCount}</p>
+          <div class="panel" style="max-width: 760px; margin: 0 auto;">
+            <h1 style="margin-top: 0;">Purge Database</h1>
+            <div class="notice danger">
+              This will delete all events and all guests.
+            </div>
 
-          <form method="POST" action="/admin/purge">
-            <p>Type <strong>PURGE</strong> to confirm:</p>
-            <input name="confirmText" />
-            <button type="submit">Purge Database</button>
-          </form>
+            <div class="stats">
+              <div class="stat">
+                <div class="stat-label">Events</div>
+                <div class="stat-value">${eventCount}</div>
+              </div>
+              <div class="stat">
+                <div class="stat-label">Guests</div>
+                <div class="stat-value">${guestCount}</div>
+              </div>
+            </div>
 
-          <p><a href="/admin/events">Back to Events</a></p>
-        </body>
-      </html>
-    `);
+            <form method="POST" action="/admin/purge" style="margin-top: 18px;">
+              <div class="field">
+                <label>Type PURGE to confirm</label>
+                <input name="confirmText" />
+              </div>
+              <div class="actions">
+                <button class="danger" type="submit">Purge Database</button>
+                <a class="button secondary" href="/admin/events">Cancel</a>
+              </div>
+            </form>
+          </div>
+        `
+      )
+    );
   } catch (err) {
     res.status(500).send(escapeHtml(err.message));
   }
@@ -1068,18 +1775,20 @@ app.post('/admin/purge', async (req, res) => {
     await pool.query(`DELETE FROM events`);
     await pool.query('COMMIT');
 
-    res.send(`
-      <html>
-        <head>
-          <title>Purge Complete</title>
-        </head>
-        <body>
-          <h1>Purge Complete</h1>
-          <p>All guests and events have been deleted.</p>
-          <p><a href="/admin/events">Back to Events</a></p>
-        </body>
-      </html>
-    `);
+    res.send(
+      renderLayout(
+        'Purge Complete',
+        `
+          <div class="panel" style="max-width: 760px; margin: 0 auto;">
+            <h1 style="margin-top: 0;">Purge Complete</h1>
+            <p class="muted">All guests and events have been deleted.</p>
+            <div class="actions">
+              <a class="button" href="/admin/events">Back to Events</a>
+            </div>
+          </div>
+        `
+      )
+    );
   } catch (err) {
     try {
       await pool.query('ROLLBACK');
@@ -1130,7 +1839,6 @@ app.get('/setup', async (req, res) => {
         full_name TEXT,
         company TEXT,
         table_name TEXT,
-        seat TEXT,
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
@@ -1172,11 +1880,6 @@ app.get('/setup', async (req, res) => {
 
     await pool.query(`
       ALTER TABLE guests
-      ADD COLUMN IF NOT EXISTS seat TEXT;
-    `);
-
-    await pool.query(`
-      ALTER TABLE guests
       ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
     `);
 
@@ -1185,7 +1888,20 @@ app.get('/setup', async (req, res) => {
       ON events(public_token);
     `);
 
-    res.send('Setup complete');
+    res.send(
+      renderLayout(
+        'Setup Complete',
+        `
+          <div class="panel" style="max-width: 760px; margin: 0 auto;">
+            <h1 style="margin-top: 0;">Setup Complete</h1>
+            <p class="muted">Database tables and columns are ready.</p>
+            <div class="actions">
+              <a class="button" href="/admin/events">Go to Events</a>
+            </div>
+          </div>
+        `
+      )
+    );
   } catch (err) {
     res.status(500).send(escapeHtml(err.message));
   }
