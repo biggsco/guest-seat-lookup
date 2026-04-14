@@ -23,6 +23,7 @@ app.get('/', (req, res) => {
           <li><a href="/health">Health</a></li>
           <li><a href="/setup">Setup Database</a></li>
           <li><a href="/seed">Seed Test Data</a></li>
+          <li><a href="/debug/guests">Debug Guests</a></li>
         </ul>
       </body>
     </html>
@@ -37,7 +38,7 @@ app.get('/search', async (req, res) => {
     try {
       const dbResult = await pool.query(
         `
-        SELECT full_name, company, table_name, seat
+        SELECT id, event_id, full_name, company, table_name, seat
         FROM guests
         WHERE event_id = 1
           AND (
@@ -57,7 +58,7 @@ app.get('/search', async (req, res) => {
           <body>
             <h1>Search Error</h1>
             <p>${err.message}</p>
-            <a href="/search">Back</a>
+            <p><a href="/search">Back</a></p>
           </body>
         </html>
       `);
@@ -72,6 +73,7 @@ app.get('/search', async (req, res) => {
           ${results.map(row => `
             <li>
               <strong>${row.full_name || 'No name'}</strong><br/>
+              Event ID: ${row.event_id}<br/>
               Company: ${row.company || 'N/A'}<br/>
               Table: ${row.table_name || 'N/A'}<br/>
               Seat: ${row.seat || 'N/A'}
@@ -89,7 +91,11 @@ app.get('/search', async (req, res) => {
         <h1>Guest Search</h1>
 
         <form method="GET" action="/search">
-          <input name="q" placeholder="Search name or company" value="${q.replace(/"/g, '&quot;')}" />
+          <input
+            name="q"
+            placeholder="Search name or company"
+            value="${q.replace(/"/g, '&quot;')}"
+          />
           <button type="submit">Search</button>
         </form>
 
@@ -104,12 +110,14 @@ app.get('/search', async (req, res) => {
 app.get('/api/search', async (req, res) => {
   const q = req.query.q || '';
 
-  if (!q.trim()) return res.json([]);
+  if (!q.trim()) {
+    return res.json([]);
+  }
 
   try {
     const dbResult = await pool.query(
       `
-      SELECT full_name, company, table_name, seat
+      SELECT id, event_id, full_name, company, table_name, seat
       FROM guests
       WHERE event_id = 1
         AND (
@@ -125,6 +133,30 @@ app.get('/api/search', async (req, res) => {
     res.json(dbResult.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/debug/guests', async (req, res) => {
+  try {
+    const dbResult = await pool.query(`
+      SELECT id, event_id, full_name, company, table_name, seat
+      FROM guests
+      ORDER BY event_id ASC, id ASC
+      LIMIT 100
+    `);
+
+    res.send(`
+      <html>
+        <head><title>Debug Guests</title></head>
+        <body>
+          <h1>Debug Guests</h1>
+          <pre>${JSON.stringify(dbResult.rows, null, 2)}</pre>
+          <p><a href="/">Home</a></p>
+        </body>
+      </html>
+    `);
+  } catch (err) {
+    res.status(500).send(err.message);
   }
 });
 
