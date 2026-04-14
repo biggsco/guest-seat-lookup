@@ -1,7 +1,11 @@
 const express = require('express');
+const multer = require('multer');
+const XLSX = require('xlsx');
+const crypto = require('crypto');
 const { pool, testDb } = require('./db');
 
 const app = express();
+const upload = multer({ storage: multer.memoryStorage() });
 
 const PORT = process.env.PORT || 10000;
 const HOST = '0.0.0.0';
@@ -9,8 +13,16 @@ const HOST = '0.0.0.0';
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Temporary in-memory upload sessions.
+// Fine for now, but these reset if the app redeploys/restarts.
+const uploadSessions = new Map();
+
 function generateToken() {
   return Math.random().toString(36).slice(2, 10);
+}
+
+function generateUploadToken() {
+  return crypto.randomBytes(12).toString('hex');
 }
 
 function escapeHtml(value) {
@@ -20,6 +32,89 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function normalizeCell(value) {
+  if (value === undefined || value === null) return '';
+  return String(value).trim();
+}
+
+function parseWorkbookFromBuffer(fileBuffer, originalName) {
+  const workbook = XLSX.read(fileBuffer, {
+    type: 'buffer',
+    raw: false
+  });
+
+  const firstSheetName = workbook.SheetNames[0];
+
+  if (!firstSheetName) {
+    throw new Error('No sheet found in uploaded file');
+  }
+
+  const worksheet = workbook.Sheets[firstSheetName];
+
+  const rows = XLSX.utils.sheet_to_json(worksheet, {
+    header: 1,
+    blankrows: false,
+    defval: ''
+  });
+
+  if (!rows.length) {
+    throw new Error('The uploaded file is empty');
+  }
+
+  const headers = rows[0].map((cell, index) => {
+    const value = normalizeCell(cell);
+    return value || `Column ${index + 1}`;
+  });
+
+  const dataRows = rows.slice(1).map(row => {
+    const normalized = headers.map((_, index) => normalizeCell(row[index]));
+    return normalized;
+  });
+
+  const nonEmptyRows = dataRows.filter(row =>
+    row.some(cell => String(cell).trim() !== '')
+  );
+
+  return {
+    originalName,
+    firstSheetName,
+    headers,
+    rows: nonEmptyRows
+  };
+}
+
+function renderPreviewTable(headers, rows, maxRows = 10) {
+  const previewRows = rows.slice(0, maxRows);
+
+  return `
+    <table border="1" cellpadding="6" cellspacing="0">
+      <thead>
+        <tr>
+          ${headers.map(header => `<th>${escapeHtml(header)}</th>`).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        ${previewRows.map(row => `
+          <tr>
+            ${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function mappingSelect(name, headers) {
+  return `
+    <select name="${name}">
+      <option value="">-- Ignore --</option>
+      ${headers.map((header, index) => `
+        <option value="${index}">${escapeHtml(header)}</option>
+      `).join('')}
+    </select>
+  `;
 }
 
 app.get('/', (req, res) => {
@@ -244,7 +339,7 @@ app.get('/admin/events', async (req, res) => {
                 Token: ${escapeHtml(e.public_token || '(missing)')}<br/>
                 Status: ${e.is_published ? 'Published' : 'Draft'}<br/>
                 <a href="/search?event=${encodeURIComponent(e.public_token || '')}">View Search</a><br/>
-                <a href="/admin/events/${encodeURIComponent(e.public_token || '')}/import">Import Guests</a><br/>
+                <a href="/admin/events/${encodeURIComponent(e.public_token || '')}/upload">Upload Guest File</a><br/>
                 ${e.is_published
                   ? `<a href="/admin/events/${encodeURIComponent(e.public_token || '')}/unpublish">Unpublish</a>`
                   : `<a href="/admin/events/${encodeURIComponent(e.public_token || '')}/publish">Publish</a>`
@@ -323,7 +418,7 @@ app.post('/admin/events/new', async (req, res) => {
   }
 });
 
-app.get('/admin/events/:token/import', async (req, res) => {
+app.get('/admin/events/:token/upload', async (req, res) => {
   const token = req.params.token;
 
   try {
@@ -345,26 +440,18 @@ app.get('/admin/events/:token/import', async (req, res) => {
     res.send(`
       <html>
         <head>
-          <title>Import Guests</title>
+          <title>Upload Guest File</title>
         </head>
         <body>
-          <h1>Import Guests</h1>
+          <h1>Upload Guest File</h1>
           <p>Event: <strong>${escapeHtml(event.name)}</strong></p>
 
-          <p>Paste CSV with this header:</p>
-          <pre>full_name,company,table_name,seat</pre>
+          <p>Upload a CSV or Excel file.</p>
+          <p>This version uses the first sheet for Excel files.</p>
 
-          <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/import">
-            <textarea
-              name="csv"
-              rows="12"
-              cols="80"
-              placeholder="full_name,company,table_name,seat
-John Smith,Acme Corp,Table 1,A1
-Jane Doe,Globex,Table 2,B3"
-            ></textarea>
-            <br/><br/>
-            <button type="submit">Import Guests</button>
+          <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/upload" enctype="multipart/form-data">
+            <input type="file" name="guestFile" accept=".csv,.xlsx,.xls" required />
+            <button type="submit">Upload and Preview</button>
           </form>
 
           <p><a href="/admin/events">Back to Events</a></p>
@@ -376,14 +463,13 @@ Jane Doe,Globex,Table 2,B3"
   }
 });
 
-app.post('/admin/events/:token/import', async (req, res) => {
+app.post('/admin/events/:token/upload', upload.single('guestFile'), async (req, res) => {
   const token = req.params.token;
-  const csv = req.body.csv || '';
 
   try {
     const eventResult = await pool.query(
       `
-      SELECT id, name
+      SELECT id, name, public_token
       FROM events
       WHERE public_token = $1
       `,
@@ -395,25 +481,122 @@ app.post('/admin/events/:token/import', async (req, res) => {
     }
 
     const event = eventResult.rows[0];
-    const lines = csv
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line.length > 0);
 
-    if (lines.length < 2) {
-      return res.send('No guest rows found. Include a header row and at least one data row.');
+    if (!req.file) {
+      return res.status(400).send('No file uploaded');
     }
 
-    const rows = lines.slice(1);
+    const parsed = parseWorkbookFromBuffer(req.file.buffer, req.file.originalname);
+
+    if (!parsed.headers.length) {
+      return res.status(400).send('No columns found');
+    }
+
+    if (!parsed.rows.length) {
+      return res.status(400).send('No guest rows found');
+    }
+
+    const uploadToken = generateUploadToken();
+
+    uploadSessions.set(uploadToken, {
+      createdAt: Date.now(),
+      eventId: event.id,
+      eventName: event.name,
+      eventToken: event.public_token,
+      originalName: parsed.originalName,
+      sheetName: parsed.firstSheetName,
+      headers: parsed.headers,
+      rows: parsed.rows
+    });
+
+    res.redirect(`/admin/uploads/${uploadToken}/map`);
+  } catch (err) {
+    res.status(500).send(escapeHtml(err.message));
+  }
+});
+
+app.get('/admin/uploads/:uploadToken/map', (req, res) => {
+  const uploadToken = req.params.uploadToken;
+  const session = uploadSessions.get(uploadToken);
+
+  if (!session) {
+    return res.status(404).send('Upload session not found. Upload the file again.');
+  }
+
+  res.send(`
+    <html>
+      <head>
+        <title>Map Columns</title>
+      </head>
+      <body>
+        <h1>Map Columns</h1>
+
+        <p>Event: <strong>${escapeHtml(session.eventName)}</strong></p>
+        <p>File: ${escapeHtml(session.originalName)}</p>
+        <p>Sheet: ${escapeHtml(session.sheetName)}</p>
+        <p>Rows found: ${session.rows.length}</p>
+
+        <h2>Choose which column maps to each field</h2>
+
+        <form method="POST" action="/admin/uploads/${uploadToken}/import">
+          <p>
+            Full Name<br/>
+            ${mappingSelect('full_name', session.headers)}
+          </p>
+
+          <p>
+            Company<br/>
+            ${mappingSelect('company', session.headers)}
+          </p>
+
+          <p>
+            Table Name<br/>
+            ${mappingSelect('table_name', session.headers)}
+          </p>
+
+          <p>
+            Seat<br/>
+            ${mappingSelect('seat', session.headers)}
+          </p>
+
+          <button type="submit">Import Guests</button>
+        </form>
+
+        <h2>Preview</h2>
+        ${renderPreviewTable(session.headers, session.rows, 10)}
+
+        <p><a href="/admin/events/${encodeURIComponent(session.eventToken)}/upload">Upload a different file</a></p>
+        <p><a href="/admin/events">Back to Events</a></p>
+      </body>
+    </html>
+  `);
+});
+
+app.post('/admin/uploads/:uploadToken/import', async (req, res) => {
+  const uploadToken = req.params.uploadToken;
+  const session = uploadSessions.get(uploadToken);
+
+  if (!session) {
+    return res.status(404).send('Upload session not found. Upload the file again.');
+  }
+
+  const fullNameIndex = req.body.full_name;
+  const companyIndex = req.body.company;
+  const tableNameIndex = req.body.table_name;
+  const seatIndex = req.body.seat;
+
+  if (fullNameIndex === '' || fullNameIndex === undefined) {
+    return res.status(400).send('You must map a Full Name column.');
+  }
+
+  try {
     let imported = 0;
 
-    for (const line of rows) {
-      const parts = line.split(',').map(part => part.trim());
-
-      const full_name = parts[0] || '';
-      const company = parts[1] || '';
-      const table_name = parts[2] || '';
-      const seat = parts[3] || '';
+    for (const row of session.rows) {
+      const full_name = normalizeCell(row[Number(fullNameIndex)]);
+      const company = companyIndex === '' ? '' : normalizeCell(row[Number(companyIndex)]);
+      const table_name = tableNameIndex === '' ? '' : normalizeCell(row[Number(tableNameIndex)]);
+      const seat = seatIndex === '' ? '' : normalizeCell(row[Number(seatIndex)]);
 
       if (!full_name) {
         continue;
@@ -424,11 +607,13 @@ app.post('/admin/events/:token/import', async (req, res) => {
         INSERT INTO guests (event_id, full_name, company, table_name, seat)
         VALUES ($1, $2, $3, $4, $5)
         `,
-        [event.id, full_name, company, table_name, seat]
+        [session.eventId, full_name, company, table_name, seat]
       );
 
       imported += 1;
     }
+
+    uploadSessions.delete(uploadToken);
 
     res.send(`
       <html>
@@ -437,8 +622,8 @@ app.post('/admin/events/:token/import', async (req, res) => {
         </head>
         <body>
           <h1>Import Complete</h1>
-          <p>Imported ${imported} guests into ${escapeHtml(event.name)}.</p>
-          <p><a href="/search?event=${encodeURIComponent(token)}">Open Public Search</a></p>
+          <p>Imported ${imported} guests into ${escapeHtml(session.eventName)}.</p>
+          <p><a href="/search?event=${encodeURIComponent(session.eventToken)}">Open Public Search</a></p>
           <p><a href="/admin/events">Back to Events</a></p>
         </body>
       </html>
