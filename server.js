@@ -7,243 +7,238 @@ const PORT = process.env.PORT || 10000;
 const HOST = '0.0.0.0';
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
+// --- helper to generate token ---
+function generateToken() {
+  return Math.random().toString(36).substring(2, 10);
+}
+
+// --- HOME ---
 app.get('/', (req, res) => {
   res.send(`
-    <html>
-      <head>
-        <title>Guest Seating Lookup</title>
-      </head>
-      <body>
-        <h1>Guest Seating Lookup</h1>
-        <p>Backend is running.</p>
-        <ul>
-          <li><a href="/search">Public Search</a></li>
-          <li><a href="/admin">Admin</a></li>
-          <li><a href="/health">Health</a></li>
-          <li><a href="/setup">Setup Database</a></li>
-          <li><a href="/seed">Seed Test Data</a></li>
-          <li><a href="/debug/guests">Debug Guests</a></li>
-        </ul>
-      </body>
-    </html>
+    <h1>Guest Seating Lookup</h1>
+    <ul>
+      <li><a href="/search">Public Search</a></li>
+      <li><a href="/admin/events">Admin Events</a></li>
+      <li><a href="/health">Health</a></li>
+    </ul>
   `);
 });
 
+// --- SEARCH (by token) ---
 app.get('/search', async (req, res) => {
+  const token = req.query.event;
   const q = req.query.q || '';
+
+  if (!token) {
+    return res.send(`<p>Missing event token</p>`);
+  }
+
+  // find event
+  const eventResult = await pool.query(
+    `SELECT id, name FROM events WHERE public_token = $1`,
+    [token]
+  );
+
+  if (eventResult.rows.length === 0) {
+    return res.send(`<p>Invalid event</p>`);
+  }
+
+  const event = eventResult.rows[0];
+
   let results = [];
 
   if (q.trim()) {
-    try {
-      const dbResult = await pool.query(
-        `
-        SELECT id, event_id, full_name, company, table_name, seat
-        FROM guests
-        WHERE event_id = 1
-          AND (
-            full_name ILIKE $1
-            OR company ILIKE $1
-          )
-        ORDER BY full_name ASC
-        LIMIT 20
-        `,
-        [`%${q}%`]
-      );
-
-      results = dbResult.rows;
-    } catch (err) {
-      return res.status(500).send(`
-        <html>
-          <body>
-            <h1>Search Error</h1>
-            <p>${err.message}</p>
-            <p><a href="/search">Back</a></p>
-          </body>
-        </html>
-      `);
-    }
-  }
-
-  const resultsHtml = q.trim()
-    ? results.length > 0
-      ? `
-        <h2>Results for "${q}"</h2>
-        <ul>
-          ${results.map(row => `
-            <li>
-              <strong>${row.full_name || 'No name'}</strong><br/>
-              Event ID: ${row.event_id}<br/>
-              Company: ${row.company || 'N/A'}<br/>
-              Table: ${row.table_name || 'N/A'}<br/>
-              Seat: ${row.seat || 'N/A'}
-            </li>
-          `).join('')}
-        </ul>
-      `
-      : `<p>No results found for "${q}"</p>`
-    : `<p>Search by name or company</p>`;
-
-  res.send(`
-    <html>
-      <head><title>Search</title></head>
-      <body>
-        <h1>Guest Search</h1>
-
-        <form method="GET" action="/search">
-          <input
-            name="q"
-            placeholder="Search name or company"
-            value="${q.replace(/"/g, '&quot;')}"
-          />
-          <button type="submit">Search</button>
-        </form>
-
-        ${resultsHtml}
-
-        <p><a href="/">Home</a></p>
-      </body>
-    </html>
-  `);
-});
-
-app.get('/api/search', async (req, res) => {
-  const q = req.query.q || '';
-
-  if (!q.trim()) {
-    return res.json([]);
-  }
-
-  try {
     const dbResult = await pool.query(
       `
-      SELECT id, event_id, full_name, company, table_name, seat
+      SELECT full_name, company, table_name, seat
       FROM guests
-      WHERE event_id = 1
+      WHERE event_id = $1
         AND (
-          full_name ILIKE $1
-          OR company ILIKE $1
+          full_name ILIKE $2
+          OR company ILIKE $2
         )
-      ORDER BY full_name ASC
       LIMIT 20
       `,
-      [`%${q}%`]
+      [event.id, `%${q}%`]
     );
 
-    res.json(dbResult.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    results = dbResult.rows;
   }
-});
 
-app.get('/debug/guests', async (req, res) => {
-  try {
-    const dbResult = await pool.query(`
-      SELECT id, event_id, full_name, company, table_name, seat
-      FROM guests
-      ORDER BY event_id ASC, id ASC
-      LIMIT 100
-    `);
-
-    res.send(`
-      <html>
-        <head><title>Debug Guests</title></head>
-        <body>
-          <h1>Debug Guests</h1>
-          <pre>${JSON.stringify(dbResult.rows, null, 2)}</pre>
-          <p><a href="/">Home</a></p>
-        </body>
-      </html>
-    `);
-  } catch (err) {
-    res.status(500).send(err.message);
-  }
-});
-
-app.get('/admin', (req, res) => {
   res.send(`
-    <html>
-      <body>
-        <h1>Admin Placeholder</h1>
-        <p>Coming soon</p>
-      </body>
-    </html>
+    <h1>${event.name}</h1>
+
+    <form method="GET">
+      <input type="hidden" name="event" value="${token}" />
+      <input name="q" placeholder="Search name or company" value="${q}" />
+      <button>Search</button>
+    </form>
+
+    ${
+      q
+        ? results.length
+          ? `<ul>${results
+              .map(
+                (r) => `
+              <li>
+                <strong>${r.full_name}</strong><br/>
+                ${r.company}<br/>
+                Table: ${r.table_name} Seat: ${r.seat}
+              </li>`
+              )
+              .join('')}</ul>`
+          : `<p>No results</p>`
+        : `<p>Enter a name to search</p>`
+    }
   `);
 });
 
-app.get('/health', async (req, res) => {
-  try {
-    const db = await testDb();
+// --- ADMIN: list events ---
+app.get('/admin/events', async (req, res) => {
+  const result = await pool.query(
+    `SELECT name, public_token FROM events ORDER BY id DESC`
+  );
 
-    res.json({
-      ok: true,
-      db: 'connected',
-      time: db.now
-    });
-  } catch (err) {
-    res.status(500).json({
-      ok: false,
-      error: err.message
-    });
-  }
+  res.send(`
+    <h1>Events</h1>
+
+    <a href="/admin/events/new">Create Event</a>
+
+    <ul>
+      ${result.rows
+        .map(
+          (e) => `
+        <li>
+          ${e.name} —
+          <a href="/search?event=${e.public_token}">View Search</a> —
+          <a href="/admin/events/${e.public_token}/import">Import Guests</a>
+        </li>
+      `
+        )
+        .join('')}
+    </ul>
+  `);
 });
 
-app.get('/setup', async (req, res) => {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS events (
-        id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL,
-        event_date DATE,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
+// --- ADMIN: create event form ---
+app.get('/admin/events/new', (req, res) => {
+  res.send(`
+    <h1>Create Event</h1>
 
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS guests (
-        id SERIAL PRIMARY KEY,
-        event_id INTEGER REFERENCES events(id),
-        full_name TEXT,
-        company TEXT,
-        table_name TEXT,
-        seat TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-
-    res.send('Tables created');
-  } catch (err) {
-    res.status(500).send(err.message);
-  }
+    <form method="POST">
+      <input name="name" placeholder="Event name" required />
+      <button>Create</button>
+    </form>
+  `);
 });
 
-app.get('/seed', async (req, res) => {
-  try {
-    const event = await pool.query(`
-      INSERT INTO events (name)
-      VALUES ('Test Event')
-      RETURNING id
-    `);
+// --- ADMIN: create event ---
+app.post('/admin/events/new', async (req, res) => {
+  const { name } = req.body;
 
-    const eventId = event.rows[0].id;
+  const token = generateToken();
+
+  await pool.query(
+    `INSERT INTO events (name, public_token)
+     VALUES ($1, $2)`,
+    [name, token]
+  );
+
+  res.redirect('/admin/events');
+});
+
+// --- ADMIN: import page ---
+app.get('/admin/events/:token/import', (req, res) => {
+  const token = req.params.token;
+
+  res.send(`
+    <h1>Import Guests</h1>
+
+    <p>Paste CSV:</p>
+
+    <form method="POST">
+      <textarea name="csv" rows="10" cols="50"
+placeholder="full_name,company,table_name,seat
+John Smith,Acme,Table 1,A1"></textarea>
+      <br/>
+      <button>Import</button>
+    </form>
+  `);
+});
+
+// --- ADMIN: handle CSV import ---
+app.post('/admin/events/:token/import', async (req, res) => {
+  const token = req.params.token;
+  const csv = req.body.csv;
+
+  const eventResult = await pool.query(
+    `SELECT id FROM events WHERE public_token = $1`,
+    [token]
+  );
+
+  if (!eventResult.rows.length) {
+    return res.send('Invalid event');
+  }
+
+  const eventId = eventResult.rows[0].id;
+
+  const lines = csv.split('\n').filter((l) => l.trim());
+
+  // skip header
+  const rows = lines.slice(1);
+
+  for (const line of rows) {
+    const [full_name, company, table_name, seat] = line.split(',');
 
     await pool.query(
       `
       INSERT INTO guests (event_id, full_name, company, table_name, seat)
-      VALUES
-        ($1, 'John Smith', 'Acme Corp', 'Table 1', 'A1'),
-        ($1, 'Jane Doe', 'Globex', 'Table 2', 'B3'),
-        ($1, 'Sarah Lee', 'BlueSky', 'Table 3', 'C2')
+      VALUES ($1, $2, $3, $4, $5)
       `,
-      [eventId]
+      [eventId, full_name, company, table_name, seat]
     );
+  }
 
-    res.send('Seeded event ' + eventId);
+  res.send(`Imported ${rows.length} guests`);
+});
+
+// --- HEALTH ---
+app.get('/health', async (req, res) => {
+  try {
+    const db = await testDb();
+    res.json({ ok: true, time: db.now });
   } catch (err) {
-    res.status(500).send(err.message);
+    res.status(500).json({ ok: false });
   }
 });
 
+// --- SETUP (updated for token) ---
+app.get('/setup', async (req, res) => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS events (
+      id SERIAL PRIMARY KEY,
+      name TEXT,
+      public_token TEXT UNIQUE,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS guests (
+      id SERIAL PRIMARY KEY,
+      event_id INTEGER REFERENCES events(id),
+      full_name TEXT,
+      company TEXT,
+      table_name TEXT,
+      seat TEXT
+    );
+  `);
+
+  res.send('Setup complete');
+});
+
 app.listen(PORT, HOST, () => {
-  console.log(`Server running on ${HOST}:${PORT}`);
+  console.log(`Running on ${PORT}`);
 });
