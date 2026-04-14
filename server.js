@@ -17,8 +17,18 @@ const {
 } = require('./render');
 
 const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
 const PgSession = pgSession(session);
+
+const guestUpload = multer({
+  storage: multer.memoryStorage()
+});
+
+const logoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 2 * 1024 * 1024
+  }
+});
 
 const PORT = process.env.PORT || 10000;
 const HOST = '0.0.0.0';
@@ -140,6 +150,31 @@ function parseWorkbookFromBuffer(fileBuffer, originalName) {
   };
 }
 
+function normalizeHexColor(value, fallback) {
+  const raw = String(value || '').trim();
+  if (!raw) return fallback;
+  const match = raw.match(/^#?[0-9a-fA-F]{6}$/);
+  if (!match) return fallback;
+  return raw.startsWith('#') ? raw : `#${raw}`;
+}
+
+function imageBufferToDataUrl(file) {
+  if (!file || !file.buffer || !file.mimetype) {
+    throw new Error('Invalid image upload.');
+  }
+
+  if (!file.mimetype.startsWith('image/')) {
+    throw new Error('Logo must be an image file.');
+  }
+
+  const supported = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif'];
+  if (!supported.includes(file.mimetype)) {
+    throw new Error('Logo must be PNG, JPG, WEBP, or GIF.');
+  }
+
+  return `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+}
+
 async function getEventByToken(token) {
   const result = await pool.query(
     `
@@ -148,6 +183,9 @@ async function getEventByToken(token) {
       e.name,
       e.public_token,
       e.is_published,
+      e.logo_url,
+      e.primary_color,
+      e.tertiary_color,
       e.created_at,
       e.last_imported_at,
       e.last_import_file_name,
@@ -160,6 +198,9 @@ async function getEventByToken(token) {
       e.name,
       e.public_token,
       e.is_published,
+      e.logo_url,
+      e.primary_color,
+      e.tertiary_color,
       e.created_at,
       e.last_imported_at,
       e.last_import_file_name
@@ -200,6 +241,7 @@ function requireAdmin(req, res, next) {
 function adminNav(extraLinks = []) {
   return renderTopNav([
     { href: '/admin/events', label: 'Events' },
+    { href: '/admin/users', label: 'Admins' },
     ...extraLinks,
     { href: '/admin/logout', label: 'Log Out' }
   ]);
@@ -490,7 +532,13 @@ app.get('/e/:token', async (req, res) => {
   try {
     const eventResult = await pool.query(
       `
-      SELECT id, name, public_token
+      SELECT
+        id,
+        name,
+        public_token,
+        logo_url,
+        primary_color,
+        tertiary_color
       FROM events
       WHERE public_token = $1
         AND is_published = true
@@ -530,7 +578,11 @@ app.get('/e/:token', async (req, res) => {
             full_name ILIKE $2
             OR company ILIKE $2
           )
-        ORDER BY full_name ASC
+        ORDER BY
+          CASE
+            WHEN COALESCE(NULLIF(full_name, ''), '') = '' THEN company
+            ELSE full_name
+          END ASC
         LIMIT 50
         `,
         [event.id, `%${q}%`]
@@ -590,7 +642,11 @@ app.get('/api/search', async (req, res) => {
           full_name ILIKE $2
           OR company ILIKE $2
         )
-      ORDER BY full_name ASC
+      ORDER BY
+        CASE
+          WHEN COALESCE(NULLIF(full_name, ''), '') = '' THEN company
+          ELSE full_name
+        END ASC
       LIMIT 50
       `,
       [eventId, `%${q}%`]
@@ -621,6 +677,9 @@ app.get('/admin/events', async (req, res) => {
         e.name,
         e.public_token,
         e.is_published,
+        e.logo_url,
+        e.primary_color,
+        e.tertiary_color,
         e.created_at,
         e.last_imported_at,
         e.last_import_file_name,
@@ -632,6 +691,9 @@ app.get('/admin/events', async (req, res) => {
         e.name,
         e.public_token,
         e.is_published,
+        e.logo_url,
+        e.primary_color,
+        e.tertiary_color,
         e.created_at,
         e.last_imported_at,
         e.last_import_file_name
@@ -685,12 +747,19 @@ app.get('/admin/events', async (req, res) => {
                   <div class="event-meta">
                     <div>Public URL: <a href="/e/${encodeURIComponent(e.public_token || '')}">/e/${escapeHtml(e.public_token || '')}</a></div>
                     <div>Updated: ${escapeHtml(formatDateTime(e.last_imported_at))}</div>
+                    <div>Theme: ${escapeHtml(e.primary_color || '#1f3c88')} / ${escapeHtml(e.tertiary_color || '#eef3ff')}</div>
                   </div>
 
                   <div class="actions">
                     <a class="button secondary" href="/admin/events/${encodeURIComponent(e.public_token || '')}">Manage</a>
                     <a class="button secondary" href="/e/${encodeURIComponent(e.public_token || '')}">View Search</a>
                     <a class="button secondary" href="/admin/events/${encodeURIComponent(e.public_token || '')}/upload">Upload File</a>
+                    ${
+                      e.is_published
+                        ? `<a class="button secondary" href="/admin/events/${encodeURIComponent(e.public_token || '')}/unpublish">Unpublish</a>`
+                        : `<a class="button success" href="/admin/events/${encodeURIComponent(e.public_token || '')}/publish">Publish</a>`
+                    }
+                    <a class="button danger" href="/admin/events/${encodeURIComponent(e.public_token || '')}/delete">Delete</a>
                   </div>
                 </div>
               `).join('')}
@@ -728,6 +797,18 @@ app.get('/admin/events/new', (req, res) => {
               <input id="name" name="name" placeholder="Example: Annual Gala 2026" required />
             </div>
 
+            <div class="field-row">
+              <div class="field">
+                <label for="primary_color">Primary Colour</label>
+                <input id="primary_color" name="primary_color" type="color" value="#1f3c88" />
+              </div>
+
+              <div class="field">
+                <label for="tertiary_color">Tertiary Colour</label>
+                <input id="tertiary_color" name="tertiary_color" type="color" value="#eef3ff" />
+              </div>
+            </div>
+
             <div class="actions">
               <button type="submit">Create Event</button>
               <a class="button secondary" href="/admin/events">Cancel</a>
@@ -741,6 +822,8 @@ app.get('/admin/events/new', (req, res) => {
 
 app.post('/admin/events/new', async (req, res) => {
   const name = (req.body.name || '').trim();
+  const primaryColor = normalizeHexColor(req.body.primary_color, '#1f3c88');
+  const tertiaryColor = normalizeHexColor(req.body.tertiary_color, '#eef3ff');
 
   if (!name) {
     return res.status(400).send('Event name is required');
@@ -764,10 +847,10 @@ app.post('/admin/events/new', async (req, res) => {
 
     await pool.query(
       `
-      INSERT INTO events (name, public_token, is_published)
-      VALUES ($1, $2, false)
+      INSERT INTO events (name, public_token, is_published, primary_color, tertiary_color)
+      VALUES ($1, $2, false, $3, $4)
       `,
-      [name, token]
+      [name, token, primaryColor, tertiaryColor]
     );
 
     res.redirect(`/admin/events/${encodeURIComponent(token)}`);
@@ -806,7 +889,7 @@ app.get('/admin/events/:token', async (req, res) => {
       <div class="hero">
         <div>
           <h1>${escapeHtml(event.name)}</h1>
-          <p>Manage event status, upload a new guest list, and monitor what is currently live.</p>
+          <p>Manage event status, upload a new guest list, update branding, and monitor what is currently live.</p>
         </div>
         <div>
           <span class="badge ${event.is_published ? 'published' : 'draft'}">
@@ -838,6 +921,8 @@ app.get('/admin/events/:token', async (req, res) => {
             <div class="event-meta" style="margin-top: 18px;">
               <div>Last Import File: ${escapeHtml(event.last_import_file_name || 'None')}</div>
               <div>Public URL: <a href="/e/${encodeURIComponent(event.public_token)}">/e/${escapeHtml(event.public_token)}</a></div>
+              <div>Primary Colour: ${escapeHtml(event.primary_color || '#1f3c88')}</div>
+              <div>Tertiary Colour: ${escapeHtml(event.tertiary_color || '#eef3ff')}</div>
             </div>
 
             <div class="actions">
@@ -883,6 +968,70 @@ app.get('/admin/events/:token', async (req, res) => {
 
         <div>
           <div class="panel">
+            <h2>Branding</h2>
+
+            ${
+              event.logo_url
+                ? `
+                  <div style="margin-bottom: 18px;">
+                    <img
+                      src="${escapeHtml(event.logo_url)}"
+                      alt="Event logo"
+                      style="max-width: 140px; max-height: 140px; display: block; border-radius: 16px; border: 1px solid #ddd;"
+                    />
+                  </div>
+                `
+                : `<div class="notice info" style="margin-bottom: 18px;">No logo uploaded yet.</div>`
+            }
+
+            <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/branding">
+              <div class="field-row">
+                <div class="field">
+                  <label for="primary_color">Primary Colour</label>
+                  <input
+                    id="primary_color"
+                    name="primary_color"
+                    type="color"
+                    value="${escapeHtml(event.primary_color || '#1f3c88')}"
+                  />
+                </div>
+
+                <div class="field">
+                  <label for="tertiary_color">Tertiary Colour</label>
+                  <input
+                    id="tertiary_color"
+                    name="tertiary_color"
+                    type="color"
+                    value="${escapeHtml(event.tertiary_color || '#eef3ff')}"
+                  />
+                </div>
+              </div>
+
+              <div class="actions">
+                <button type="submit">Save Theme</button>
+              </div>
+            </form>
+
+            <hr style="margin: 24px 0;" />
+
+            <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/logo" enctype="multipart/form-data">
+              <div class="field">
+                <label for="logoFile">Event Logo</label>
+                <input id="logoFile" type="file" name="logoFile" accept=".png,.jpg,.jpeg,.webp,.gif,image/*" />
+              </div>
+
+              <div class="actions">
+                <button type="submit">Upload Logo</button>
+                ${
+                  event.logo_url
+                    ? `<a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/logo/remove">Remove Logo</a>`
+                    : ''
+                }
+              </div>
+            </form>
+          </div>
+
+          <div class="panel">
             <h2>Actions</h2>
             <div class="actions">
               <a class="button secondary" href="/e/${encodeURIComponent(event.public_token)}">View Search</a>
@@ -904,6 +1053,86 @@ app.get('/admin/events/:token', async (req, res) => {
     res.send(renderLayout(`Manage ${event.name}`, body, { fullWidth: true }));
   } catch (err) {
     res.status(500).send(renderLayout('Error', `<div class="notice danger">${escapeHtml(err.message)}</div>`));
+  }
+});
+
+app.post('/admin/events/:token/branding', async (req, res) => {
+  const token = req.params.token;
+
+  try {
+    const event = await getEventByToken(token);
+
+    if (!event) {
+      return res.status(404).send('Event not found');
+    }
+
+    const primaryColor = normalizeHexColor(req.body.primary_color, '#1f3c88');
+    const tertiaryColor = normalizeHexColor(req.body.tertiary_color, '#eef3ff');
+
+    await pool.query(
+      `
+      UPDATE events
+      SET
+        primary_color = $2,
+        tertiary_color = $3
+      WHERE public_token = $1
+      `,
+      [token, primaryColor, tertiaryColor]
+    );
+
+    res.redirect(`/admin/events/${encodeURIComponent(token)}`);
+  } catch (err) {
+    res.status(500).send(escapeHtml(err.message));
+  }
+});
+
+app.post('/admin/events/:token/logo', logoUpload.single('logoFile'), async (req, res) => {
+  const token = req.params.token;
+
+  try {
+    const event = await getEventByToken(token);
+
+    if (!event) {
+      return res.status(404).send('Event not found');
+    }
+
+    if (!req.file) {
+      return res.status(400).send('No logo file uploaded');
+    }
+
+    const dataUrl = imageBufferToDataUrl(req.file);
+
+    await pool.query(
+      `
+      UPDATE events
+      SET logo_url = $2
+      WHERE public_token = $1
+      `,
+      [token, dataUrl]
+    );
+
+    res.redirect(`/admin/events/${encodeURIComponent(token)}`);
+  } catch (err) {
+    res.status(500).send(escapeHtml(err.message));
+  }
+});
+
+app.get('/admin/events/:token/logo/remove', async (req, res) => {
+  const token = req.params.token;
+
+  try {
+    await pool.query(
+      `
+      UPDATE events
+      SET logo_url = NULL
+      WHERE public_token = $1
+      `,
+      [token]
+    );
+
+    res.redirect(`/admin/events/${encodeURIComponent(token)}`);
+  } catch (err) {
+    res.status(500).send(escapeHtml(err.message));
   }
 });
 
@@ -960,7 +1189,7 @@ app.get('/admin/events/:token/upload', async (req, res) => {
   }
 });
 
-app.post('/admin/events/:token/upload', upload.single('guestFile'), async (req, res) => {
+app.post('/admin/events/:token/upload', guestUpload.single('guestFile'), async (req, res) => {
   const token = req.params.token;
   const importMode = (req.body.importMode || 'replace').trim() === 'append' ? 'append' : 'replace';
 
@@ -1055,7 +1284,7 @@ app.get('/admin/uploads/:uploadToken/map', (req, res) => {
           </div>
 
           <div class="notice info">
-            Full Name is required. Company and Table are optional.
+            Each imported guest row must include at least a Full Name or a Company. Table is optional.
           </div>
 
           <div class="actions">
@@ -1089,8 +1318,8 @@ app.post('/admin/uploads/:uploadToken/import', async (req, res) => {
   const companyIndex = req.body.company;
   const tableNameIndex = req.body.table_name;
 
-  if (fullNameIndex === '' || fullNameIndex === undefined) {
-    return res.status(400).send('You must map a Full Name column.');
+  if ((fullNameIndex === '' || fullNameIndex === undefined) && (companyIndex === '' || companyIndex === undefined)) {
+    return res.status(400).send('You must map at least a Full Name column or a Company column.');
   }
 
   try {
@@ -1106,11 +1335,11 @@ app.post('/admin/uploads/:uploadToken/import', async (req, res) => {
     let imported = 0;
 
     for (const row of sessionState.rows) {
-      const full_name = normalizeCell(row[Number(fullNameIndex)]);
+      const full_name = fullNameIndex === '' ? '' : normalizeCell(row[Number(fullNameIndex)]);
       const company = companyIndex === '' ? '' : normalizeCell(row[Number(companyIndex)]);
       const table_name = tableNameIndex === '' ? '' : normalizeCell(row[Number(tableNameIndex)]);
 
-      if (!full_name) {
+      if (!full_name && !company) {
         continue;
       }
 
@@ -1416,6 +1645,152 @@ app.post('/admin/events/:token/delete', async (req, res) => {
   }
 });
 
+app.get('/admin/users', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT id, username, created_at
+      FROM admins
+      ORDER BY created_at ASC, id ASC
+      `
+    );
+
+    const body = `
+      ${adminNav([{ href: '/admin/events', label: 'Back to Events' }])}
+
+      <div class="hero">
+        <div>
+          <h1>Admin Users</h1>
+          <p>Create additional admin users for event management.</p>
+        </div>
+        <div class="actions" style="margin-top: 0;">
+          <a class="button" href="/admin/users/new">Create Admin User</a>
+        </div>
+      </div>
+
+      <div class="panel">
+        ${
+          result.rows.length
+            ? `
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Username</th>
+                      <th>Created</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${result.rows.map(user => `
+                      <tr>
+                        <td>${escapeHtml(user.username)}</td>
+                        <td>${escapeHtml(formatDateTime(user.created_at))}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `
+            : `<div class="empty-state">No admin users found.</div>`
+        }
+      </div>
+    `;
+
+    res.send(renderLayout('Admin Users', body));
+  } catch (err) {
+    res.status(500).send(renderLayout('Error', `<div class="notice danger">${escapeHtml(err.message)}</div>`));
+  }
+});
+
+app.get('/admin/users/new', (req, res) => {
+  res.send(
+    renderLayout(
+      'Create Admin User',
+      `
+        ${adminNav([{ href: '/admin/users', label: 'Back to Admin Users' }])}
+
+        <div class="panel" style="max-width: 720px; margin: 0 auto;">
+          <h1 style="margin-top: 0;">Create Admin User</h1>
+
+          <form method="POST" action="/admin/users/new">
+            <div class="field">
+              <label for="username">Username</label>
+              <input id="username" name="username" required />
+            </div>
+
+            <div class="field">
+              <label for="password">Password</label>
+              <input id="password" type="password" name="password" required />
+            </div>
+
+            <div class="actions">
+              <button type="submit">Create Admin</button>
+              <a class="button secondary" href="/admin/users">Cancel</a>
+            </div>
+          </form>
+        </div>
+      `
+    )
+  );
+});
+
+app.post('/admin/users/new', async (req, res) => {
+  const username = (req.body.username || '').trim();
+  const password = String(req.body.password || '');
+
+  if (!username || !password) {
+    return res.status(400).send(
+      renderLayout(
+        'Create Admin User',
+        `
+          <div class="panel" style="max-width: 720px; margin: 0 auto;">
+            <h1 style="margin-top: 0;">Create Admin User</h1>
+            <div class="notice danger">Username and password are required.</div>
+            <div class="actions">
+              <a class="button secondary" href="/admin/users/new">Try Again</a>
+            </div>
+          </div>
+        `
+      )
+    );
+  }
+
+  try {
+    const existing = await getAdminByUsername(username);
+
+    if (existing) {
+      return res.status(400).send(
+        renderLayout(
+          'Create Admin User',
+          `
+            <div class="panel" style="max-width: 720px; margin: 0 auto;">
+              <h1 style="margin-top: 0;">Create Admin User</h1>
+              <div class="notice danger">That username already exists.</div>
+              <div class="actions">
+                <a class="button secondary" href="/admin/users/new">Try Again</a>
+              </div>
+            </div>
+          `
+        )
+      );
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    await pool.query(
+      `
+      INSERT INTO admins (username, password_hash)
+      VALUES ($1, $2)
+      `,
+      [username, passwordHash]
+    );
+
+    res.redirect('/admin/users');
+  } catch (err) {
+    res.status(500).send(escapeHtml(err.message));
+  }
+});
+
 app.get('/health', async (req, res) => {
   try {
     const db = await testDb();
@@ -1442,6 +1817,9 @@ app.get('/setup', async (req, res) => {
         name TEXT,
         public_token TEXT UNIQUE,
         is_published BOOLEAN DEFAULT false,
+        logo_url TEXT,
+        primary_color TEXT,
+        tertiary_color TEXT,
         last_imported_at TIMESTAMP,
         last_import_file_name TEXT,
         created_at TIMESTAMP DEFAULT NOW()
@@ -1480,6 +1858,21 @@ app.get('/setup', async (req, res) => {
 
     await pool.query(`
       ALTER TABLE events
+      ADD COLUMN IF NOT EXISTS logo_url TEXT;
+    `);
+
+    await pool.query(`
+      ALTER TABLE events
+      ADD COLUMN IF NOT EXISTS primary_color TEXT;
+    `);
+
+    await pool.query(`
+      ALTER TABLE events
+      ADD COLUMN IF NOT EXISTS tertiary_color TEXT;
+    `);
+
+    await pool.query(`
+      ALTER TABLE events
       ADD COLUMN IF NOT EXISTS last_imported_at TIMESTAMP;
     `);
 
@@ -1509,6 +1902,18 @@ app.get('/setup', async (req, res) => {
     `);
 
     await pool.query(`
+      UPDATE events
+      SET primary_color = '#1f3c88'
+      WHERE primary_color IS NULL OR primary_color = '';
+    `);
+
+    await pool.query(`
+      UPDATE events
+      SET tertiary_color = '#eef3ff'
+      WHERE tertiary_color IS NULL OR tertiary_color = '';
+    `);
+
+    await pool.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS events_public_token_idx
       ON events(public_token);
     `);
@@ -1524,7 +1929,7 @@ app.get('/setup', async (req, res) => {
         `
           <div class="panel" style="max-width: 760px; margin: 0 auto;">
             <h1 style="margin-top: 0;">Setup Complete</h1>
-            <p class="muted">Database tables, admin auth, and session storage are ready.</p>
+            <p class="muted">Database tables, branding fields, admin auth, and session storage are ready.</p>
             <div class="actions">
               <a class="button" href="/admin/login">Go to Admin Login</a>
             </div>
