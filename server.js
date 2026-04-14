@@ -16,7 +16,7 @@ app.get('/', (req, res) => {
       </head>
       <body>
         <h1>Guest Seating Lookup</h1>
-        <p>Backend is running.</p>
+        <p>Backend is running. VERSION 2</p>
         <ul>
           <li><a href="/search">Public Search</a></li>
           <li><a href="/admin">Admin</a></li>
@@ -102,7 +102,7 @@ app.get('/setup', async (req, res) => {
 
     res.send('Tables created successfully');
   } catch (err) {
-    res.status(500).send(`Setup failed: ${err.message}`);
+    res.status(500).send('Setup failed: ' + err.message);
   }
 });
 
@@ -127,9 +127,9 @@ app.get('/seed', async (req, res) => {
       [eventId]
     );
 
-    res.send(`Seed data inserted for event ID ${eventId}`);
+    res.send('Seed data inserted for event ID ' + eventId);
   } catch (err) {
-    res.status(500).send(`Seed failed: ${err.message}`);
+    res.status(500).send('Seed failed: ' + err.message);
   }
 });
 
