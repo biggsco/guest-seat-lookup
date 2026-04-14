@@ -13,6 +13,15 @@ function generateToken() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 app.get('/', (req, res) => {
   res.send(`
     <html>
@@ -36,8 +45,8 @@ app.get('/', (req, res) => {
 });
 
 app.get('/search', async (req, res) => {
-  const token = req.query.event || '';
-  const q = req.query.q || '';
+  const token = (req.query.event || '').trim();
+  const q = (req.query.q || '').trim();
 
   if (!token) {
     return res.send(`
@@ -59,6 +68,7 @@ app.get('/search', async (req, res) => {
       SELECT id, name, public_token
       FROM events
       WHERE public_token = $1
+        AND is_published = true
       `,
       [token]
     );
@@ -69,7 +79,7 @@ app.get('/search', async (req, res) => {
           <head><title>Search</title></head>
           <body>
             <h1>Guest Search</h1>
-            <p>Invalid event.</p>
+            <p>Event not found or not published yet.</p>
             <p><a href="/">Home</a></p>
           </body>
         </html>
@@ -79,7 +89,7 @@ app.get('/search', async (req, res) => {
     const event = eventResult.rows[0];
     let results = [];
 
-    if (q.trim()) {
+    if (q) {
       const dbResult = await pool.query(
         `
         SELECT full_name, company, table_name, seat
@@ -98,23 +108,23 @@ app.get('/search', async (req, res) => {
       results = dbResult.rows;
     }
 
-    const resultsHtml = q.trim()
+    const resultsHtml = q
       ? results.length > 0
         ? `
-          <h2>Results for "${q}"</h2>
+          <h2>Results for "${escapeHtml(q)}"</h2>
           <ul>
             ${results.map(row => `
               <li style="margin-bottom: 16px;">
-                <strong>${row.full_name || 'No name'}</strong><br/>
-                Company: ${row.company || 'N/A'}<br/>
-                Table: ${row.table_name || 'N/A'}<br/>
-                Seat: ${row.seat || 'N/A'}
+                <strong>${escapeHtml(row.full_name || 'No name')}</strong><br/>
+                Company: ${escapeHtml(row.company || 'N/A')}<br/>
+                Table: ${escapeHtml(row.table_name || 'N/A')}<br/>
+                Seat: ${escapeHtml(row.seat || 'N/A')}
               </li>
             `).join('')}
           </ul>
         `
         : `
-          <h2>Results for "${q}"</h2>
+          <h2>Results for "${escapeHtml(q)}"</h2>
           <p>No results found.</p>
         `
       : `
@@ -124,18 +134,18 @@ app.get('/search', async (req, res) => {
     res.send(`
       <html>
         <head>
-          <title>${event.name}</title>
+          <title>${escapeHtml(event.name)}</title>
         </head>
         <body>
-          <h1>${event.name}</h1>
+          <h1>${escapeHtml(event.name)}</h1>
 
           <form method="GET" action="/search">
-            <input type="hidden" name="event" value="${event.public_token}" />
+            <input type="hidden" name="event" value="${escapeHtml(event.public_token)}" />
             <input
               type="text"
               name="q"
               placeholder="Enter name or company"
-              value="${q.replace(/"/g, '&quot;')}"
+              value="${escapeHtml(q)}"
             />
             <button type="submit">Search</button>
           </form>
@@ -152,7 +162,7 @@ app.get('/search', async (req, res) => {
         <head><title>Search Error</title></head>
         <body>
           <h1>Search Error</h1>
-          <p>${err.message}</p>
+          <p>${escapeHtml(err.message)}</p>
           <p><a href="/">Home</a></p>
         </body>
       </html>
@@ -161,10 +171,10 @@ app.get('/search', async (req, res) => {
 });
 
 app.get('/api/search', async (req, res) => {
-  const token = req.query.event || '';
-  const q = req.query.q || '';
+  const token = (req.query.event || '').trim();
+  const q = (req.query.q || '').trim();
 
-  if (!token || !q.trim()) {
+  if (!token || !q) {
     return res.json([]);
   }
 
@@ -174,6 +184,7 @@ app.get('/api/search', async (req, res) => {
       SELECT id
       FROM events
       WHERE public_token = $1
+        AND is_published = true
       `,
       [token]
     );
@@ -209,7 +220,7 @@ app.get('/admin/events', async (req, res) => {
   try {
     const result = await pool.query(
       `
-      SELECT id, name, public_token, created_at
+      SELECT id, name, public_token, is_published, created_at
       FROM events
       ORDER BY id DESC
       `
@@ -223,21 +234,21 @@ app.get('/admin/events', async (req, res) => {
         <body>
           <h1>Events</h1>
 
-          <p>
-            <a href="/admin/events/new">Create Event</a>
-          </p>
-
-          <p>
-            <a href="/admin/purge">Purge Database</a>
-          </p>
+          <p><a href="/admin/events/new">Create Event</a></p>
+          <p><a href="/admin/purge">Purge Database</a></p>
 
           <ul>
             ${result.rows.map(e => `
-              <li style="margin-bottom: 16px;">
-                <strong>${e.name || 'Untitled Event'}</strong><br/>
-                Token: ${e.public_token || '(missing)'}<br/>
-                <a href="/search?event=${e.public_token}">View Search</a><br/>
-                <a href="/admin/events/${e.public_token}/import">Import Guests</a>
+              <li style="margin-bottom: 20px;">
+                <strong>${escapeHtml(e.name || 'Untitled Event')}</strong><br/>
+                Token: ${escapeHtml(e.public_token || '(missing)')}<br/>
+                Status: ${e.is_published ? 'Published' : 'Draft'}<br/>
+                <a href="/search?event=${encodeURIComponent(e.public_token || '')}">View Search</a><br/>
+                <a href="/admin/events/${encodeURIComponent(e.public_token || '')}/import">Import Guests</a><br/>
+                ${e.is_published
+                  ? `<a href="/admin/events/${encodeURIComponent(e.public_token || '')}/unpublish">Unpublish</a>`
+                  : `<a href="/admin/events/${encodeURIComponent(e.public_token || '')}/publish">Publish</a>`
+                }
               </li>
             `).join('')}
           </ul>
@@ -247,7 +258,7 @@ app.get('/admin/events', async (req, res) => {
       </html>
     `);
   } catch (err) {
-    res.status(500).send(err.message);
+    res.status(500).send(escapeHtml(err.message));
   }
 });
 
@@ -285,7 +296,7 @@ app.post('/admin/events/new', async (req, res) => {
   try {
     let token = generateToken();
 
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
       const existing = await pool.query(
         `SELECT id FROM events WHERE public_token = $1`,
         [token]
@@ -300,15 +311,15 @@ app.post('/admin/events/new', async (req, res) => {
 
     await pool.query(
       `
-      INSERT INTO events (name, public_token)
-      VALUES ($1, $2)
+      INSERT INTO events (name, public_token, is_published)
+      VALUES ($1, $2, false)
       `,
       [name, token]
     );
 
     res.redirect('/admin/events');
   } catch (err) {
-    res.status(500).send(err.message);
+    res.status(500).send(escapeHtml(err.message));
   }
 });
 
@@ -338,12 +349,12 @@ app.get('/admin/events/:token/import', async (req, res) => {
         </head>
         <body>
           <h1>Import Guests</h1>
-          <p>Event: <strong>${event.name}</strong></p>
+          <p>Event: <strong>${escapeHtml(event.name)}</strong></p>
 
           <p>Paste CSV with this header:</p>
           <pre>full_name,company,table_name,seat</pre>
 
-          <form method="POST" action="/admin/events/${event.public_token}/import">
+          <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/import">
             <textarea
               name="csv"
               rows="12"
@@ -361,7 +372,7 @@ Jane Doe,Globex,Table 2,B3"
       </html>
     `);
   } catch (err) {
-    res.status(500).send(err.message);
+    res.status(500).send(escapeHtml(err.message));
   }
 });
 
@@ -426,14 +437,52 @@ app.post('/admin/events/:token/import', async (req, res) => {
         </head>
         <body>
           <h1>Import Complete</h1>
-          <p>Imported ${imported} guests into ${event.name}.</p>
-          <p><a href="/search?event=${token}">Open Public Search</a></p>
+          <p>Imported ${imported} guests into ${escapeHtml(event.name)}.</p>
+          <p><a href="/search?event=${encodeURIComponent(token)}">Open Public Search</a></p>
           <p><a href="/admin/events">Back to Events</a></p>
         </body>
       </html>
     `);
   } catch (err) {
-    res.status(500).send(err.message);
+    res.status(500).send(escapeHtml(err.message));
+  }
+});
+
+app.get('/admin/events/:token/publish', async (req, res) => {
+  const token = req.params.token;
+
+  try {
+    await pool.query(
+      `
+      UPDATE events
+      SET is_published = true
+      WHERE public_token = $1
+      `,
+      [token]
+    );
+
+    res.redirect('/admin/events');
+  } catch (err) {
+    res.status(500).send(escapeHtml(err.message));
+  }
+});
+
+app.get('/admin/events/:token/unpublish', async (req, res) => {
+  const token = req.params.token;
+
+  try {
+    await pool.query(
+      `
+      UPDATE events
+      SET is_published = false
+      WHERE public_token = $1
+      `,
+      [token]
+    );
+
+    res.redirect('/admin/events');
+  } catch (err) {
+    res.status(500).send(escapeHtml(err.message));
   }
 });
 
@@ -468,7 +517,7 @@ app.get('/admin/purge', async (req, res) => {
       </html>
     `);
   } catch (err) {
-    res.status(500).send(err.message);
+    res.status(500).send(escapeHtml(err.message));
   }
 });
 
@@ -499,7 +548,7 @@ app.post('/admin/purge', async (req, res) => {
     `);
   } catch (err) {
     await pool.query('ROLLBACK');
-    res.status(500).send(err.message);
+    res.status(500).send(escapeHtml(err.message));
   }
 });
 
@@ -528,6 +577,7 @@ app.get('/setup', async (req, res) => {
         id SERIAL PRIMARY KEY,
         name TEXT,
         public_token TEXT UNIQUE,
+        is_published BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
@@ -547,6 +597,11 @@ app.get('/setup', async (req, res) => {
     await pool.query(`
       ALTER TABLE events
       ADD COLUMN IF NOT EXISTS public_token TEXT;
+    `);
+
+    await pool.query(`
+      ALTER TABLE events
+      ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT false;
     `);
 
     await pool.query(`
@@ -581,7 +636,7 @@ app.get('/setup', async (req, res) => {
 
     res.send('Setup complete');
   } catch (err) {
-    res.status(500).send(err.message);
+    res.status(500).send(escapeHtml(err.message));
   }
 });
 
