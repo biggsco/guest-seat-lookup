@@ -4,11 +4,11 @@ const session = require('express-session');
 const pgSession = require('connect-pg-simple');
 const { pool } = require('./db');
 
-const publicRoutes = require('./routes/public');
-const authRoutes = require('./routes/auth');
-const adminEventRoutes = require('./routes/adminEvents');
-const adminUserRoutes = require('./routes/adminUsers');
-const setupRoutes = require('./routes/setup');
+const publicRoutes = require('./routes/public.js');
+const authRoutes = require('./routes/auth.js');
+const adminEventRoutes = require('./routes/adminEvents.js');
+const adminUserRoutes = require('./routes/adminUsers.js');
+const setupRoutes = require('./routes/setup.js');
 
 const app = express();
 const PgSession = pgSession(session);
