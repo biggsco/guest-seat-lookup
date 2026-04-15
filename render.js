@@ -72,17 +72,41 @@ function renderMappingSelect(name, headers, defaultValue) {
 }
 
 function renderSearchPage(event, q, results) {
+  const primaryColor = escapeHtml(event.primary_color || '#1f3c88');
+  const tertiaryColor = escapeHtml(event.tertiary_color || '#eef3ff');
+  const logoHtml = event.logo_url
+    ? `
+      <div class="event-logo-wrap">
+        <img
+          src="${escapeHtml(event.logo_url)}"
+          alt="${escapeHtml(event.name)} logo"
+          class="event-logo"
+        />
+      </div>
+    `
+    : '';
+
   const resultsHtml = q
     ? results.length > 0
       ? `
         <div class="results-list">
-          ${results.map(row => `
-            <div class="result-card">
-              <h3>${escapeHtml(row.full_name || 'No name')}</h3>
-              <div class="muted">${escapeHtml(row.company || 'No company')}</div>
-              <div style="margin-top: 10px;"><strong>Table:</strong> ${escapeHtml(row.table_name || 'Not assigned')}</div>
-            </div>
-          `).join('')}
+          ${results.map(row => {
+            const name = escapeHtml(row.full_name || '');
+            const company = escapeHtml(row.company || '');
+            const table = escapeHtml(row.table_name || 'Not assigned');
+            const title = name || company || 'Guest';
+            const subtitle = name && company
+              ? company
+              : (!name && company ? 'Company listing' : '');
+
+            return `
+              <div class="result-card">
+                <h3>${title}</h3>
+                ${subtitle ? `<div class="muted">${subtitle}</div>` : ''}
+                <div style="margin-top: 10px;"><strong>Table:</strong> ${table}</div>
+              </div>
+            `;
+          }).join('')}
         </div>
       `
       : `
@@ -99,8 +123,12 @@ function renderSearchPage(event, q, results) {
   return renderLayout(
     event.name,
     `
-      <div class="search-shell">
+      <div
+        class="search-shell event-theme"
+        style="--event-primary: ${primaryColor}; --event-tertiary: ${tertiaryColor};"
+      >
         <div class="search-card">
+          ${logoHtml}
           <div class="muted small" style="margin-bottom: 8px;">Guest seating lookup</div>
           <h1>${escapeHtml(event.name)}</h1>
           <p class="muted" style="margin: 0 0 8px;">
