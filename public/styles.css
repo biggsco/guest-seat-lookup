@@ -1,256 +1,19 @@
-/* Reset */
-
-* {
-  box-sizing: border-box;
-}
-
 body {
-  margin: 0;
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: sans-serif;
   background: #f5f7fb;
-  color: #111;
 }
-
-/* Layout */
 
 .container {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 24px;
-}
-
-.container.wide {
-  max-width: 1400px;
-}
-
-/* Nav */
-
-.top-nav {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.top-nav a {
-  font-size: 14px;
-  color: #555;
-}
-
-/* Panels */
-
-.panel {
-  background: white;
+  max-width: 800px;
+  margin: auto;
   padding: 20px;
-  border-radius: 12px;
-  margin-bottom: 20px;
-}
-
-/* Hero */
-
-.hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 20px;
-}
-
-/* Grid */
-
-.grid {
-  display: grid;
-  gap: 16px;
-}
-
-.grid.cards {
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-}
-
-.grid.two {
-  grid-template-columns: 1fr 1fr;
-}
-
-/* Cards */
-
-.card {
-  background: white;
-  padding: 16px;
-  border-radius: 12px;
-}
-
-/* Buttons */
-
-.button,
-button {
-  padding: 10px 14px;
-  border-radius: 8px;
-  border: none;
-  background: #1f3c88;
-  color: white;
-  cursor: pointer;
-}
-
-.button.secondary {
-  background: #e6e9f2;
-  color: #333;
-}
-
-.button.success {
-  background: #2e7d32;
-}
-
-.button.danger {
-  background: #c62828;
-}
-
-.actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 14px;
-  flex-wrap: wrap;
-}
-
-/* Forms */
-
-.field {
-  display: flex;
-  flex-direction: column;
-  margin-bottom: 12px;
-}
-
-.field-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 10px;
-}
-
-label {
-  font-size: 13px;
-  margin-bottom: 4px;
-  color: #555;
-}
-
-input,
-select {
-  padding: 8px;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-}
-
-/* Tables */
-
-.table-wrap {
-  overflow-x: auto;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-th,
-td {
-  padding: 8px;
-  border-bottom: 1px solid #eee;
-  text-align: left;
-}
-
-/* Notices */
-
-.notice {
-  padding: 10px;
-  border-radius: 8px;
-}
-
-.notice.info {
-  background: #e8f0fe;
-}
-
-.notice.warning {
-  background: #fff3cd;
-}
-
-.notice.danger {
-  background: #f8d7da;
-}
-
-/* Misc */
-
-.muted {
-  color: #666;
-}
-
-.small {
-  font-size: 12px;
-}
-
-.empty-state {
-  text-align: center;
-  padding: 30px;
-  color: #666;
-}
-
-.code-line {
-  font-family: monospace;
-  background: #eee;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-/* ========================= */
-/* PUBLIC SEARCH PAGE */
-/* ========================= */
-
-.search-shell {
-  display: flex;
-  justify-content: center;
-  margin-top: 40px;
 }
 
 .search-card {
   background: white;
-  padding: 24px;
-  border-radius: 16px;
-  max-width: 520px;
-  width: 100%;
-}
-
-/* Search */
-
-.search-form {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.search-form input {
-  flex: 1;
-}
-
-/* Results */
-
-.results-list {
-  margin-top: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.result-card {
-  padding: 12px;
+  padding: 20px;
   border-radius: 10px;
-  background: #f0f2f7;
 }
-
-/* ========================= */
-/* EVENT THEMING (IMPORTANT) */
-/* ========================= */
-
-.event-theme {
-  --event-primary: #1f3c88;
-  --event-tertiary: #eef3ff;
-}
-
-/* Make theme obvious */
 
 .event-theme .search-card {
   border-top: 6px solid var(--event-primary);
@@ -262,34 +25,18 @@ td {
 
 .event-theme button {
   background: var(--event-primary);
+  color: white;
 }
 
 .event-theme .result-card {
   background: var(--event-tertiary);
+  padding: 10px;
+  margin-top: 10px;
   border-left: 4px solid var(--event-primary);
-}
-
-/* ========================= */
-/* LOGO */
-/* ========================= */
-
-.event-logo-wrap {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 12px;
 }
 
 .event-logo {
   max-width: 120px;
-  max-height: 120px;
   display: block;
-  border-radius: 10px;
-}
-
-/* Responsive */
-
-@media (max-width: 900px) {
-  .grid.two {
-    grid-template-columns: 1fr;
-  }
+  margin: 0 auto 10px;
 }
