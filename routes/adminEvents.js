@@ -1,5 +1,4 @@
 const express = require('express');
-const crypto = require('crypto');
 const { pool } = require('../db');
 const {
   escapeHtml,
