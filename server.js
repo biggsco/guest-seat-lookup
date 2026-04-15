@@ -4,11 +4,11 @@ const session = require('express-session');
 const pgSession = require('connect-pg-simple');
 const { pool } = require('./db');
 
-const publicRoutes = require('./routes/public');
-const authRoutes = require('./routes/auth');
-const adminEventRoutes = require('./routes/adminEvents');
-const adminUserRoutes = require('./routes/adminUsers');
-const setupRoutes = require('./routes/setup');
+const publicRoutes = require('./routes/public.js');
+const authRoutes = require('./routes/auth.js');
+const adminEventRoutes = require('./routes/adminEvents.js');
+const adminUserRoutes = require('./routes/adminUsers.js');
+const setupRoutes = require('./routes/setup.js');
 
 const app = express();
 const PgSession = pgSession(session);
@@ -34,23 +34,3 @@ app.use(
       createTableIfMissing: true
     }),
     secret: SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: false,
-      maxAge: 1000 * 60 * 60 * 12
-    }
-  })
-);
-
-app.use('/', publicRoutes);
-app.use('/', authRoutes);
-app.use('/', adminEventRoutes);
-app.use('/', adminUserRoutes);
-app.use('/', setupRoutes);
-
-app.listen(PORT, HOST, () => {
-  console.log(`Server running on http://${HOST}:${PORT}`);
-});
