@@ -10,6 +10,7 @@ const { requireAdmin, adminNav } = require('../lib/auth');
 const {
   normalizeCell,
   formatDateTime,
+  formatDate,
   detectColumnIndex,
   normalizeHexColor
 } = require('../lib/formatting');
@@ -30,6 +31,27 @@ function generateToken() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+function parseEventDateInput(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return raw;
+}
+
+function isPastEvent(eventDate) {
+  if (!eventDate) return false;
+  const date = new Date(`${eventDate}T00:00:00+09:30`);
+  if (Number.isNaN(date.getTime())) return false;
+
+  const nowInAdelaide = new Date(
+    new Date().toLocaleString('en-US', { timeZone: 'Australia/Adelaide' })
+  );
+  nowInAdelaide.setHours(0, 0, 0, 0);
+
+  return date < nowInAdelaide;
+}
+
 async function getEventByToken(token) {
   const result = await pool.query(
     `
@@ -41,6 +63,7 @@ async function getEventByToken(token) {
       e.logo_url,
       e.primary_color,
       e.tertiary_color,
+      e.event_date,
       e.created_at,
       e.last_imported_at,
       e.last_import_file_name,
@@ -56,6 +79,7 @@ async function getEventByToken(token) {
       e.logo_url,
       e.primary_color,
       e.tertiary_color,
+      e.event_date,
       e.created_at,
       e.last_imported_at,
       e.last_import_file_name
@@ -78,6 +102,7 @@ router.get('/admin/events', async (req, res) => {
         e.logo_url,
         e.primary_color,
         e.tertiary_color,
+        e.event_date,
         e.created_at,
         e.last_imported_at,
         e.last_import_file_name,
@@ -92,6 +117,7 @@ router.get('/admin/events', async (req, res) => {
         e.logo_url,
         e.primary_color,
         e.tertiary_color,
+        e.event_date,
         e.created_at,
         e.last_imported_at,
         e.last_import_file_name
@@ -115,8 +141,11 @@ router.get('/admin/events', async (req, res) => {
       ${
         result.rows.length
           ? `<div class="grid cards">
-              ${result.rows.map(e => `
-                <div class="card">
+              ${result.rows.map(e => {
+                const pastEvent = isPastEvent(e.event_date);
+
+                return `
+                <div class="card ${pastEvent ? 'past-event' : ''}">
                   <div class="event-card-header">
                     <div>
                       <h2 class="event-card-title">${escapeHtml(e.name || 'Untitled Event')}</h2>
@@ -128,6 +157,7 @@ router.get('/admin/events', async (req, res) => {
                       <span class="badge ${e.is_published ? 'published' : 'draft'}">
                         ${e.is_published ? 'Published' : 'Draft'}
                       </span>
+                      ${pastEvent ? '<span class="badge past-ready">Past · Ready to delete</span>' : ''}
                     </div>
                   </div>
 
@@ -149,6 +179,7 @@ router.get('/admin/events', async (req, res) => {
                   </div>
 
                   <div class="event-meta">
+                    <div>Event Date: ${escapeHtml(formatDate(e.event_date))}</div>
                     <div>Public URL: <a href="/e/${encodeURIComponent(e.public_token || '')}">/e/${escapeHtml(e.public_token || '')}</a></div>
                     <div>Updated: ${escapeHtml(formatDateTime(e.last_imported_at))}</div>
                     <div>Theme: ${escapeHtml(e.primary_color || '#1f3c88')} / ${escapeHtml(e.tertiary_color || '#eef3ff')}</div>
@@ -166,7 +197,8 @@ router.get('/admin/events', async (req, res) => {
                     <a class="button danger" href="/admin/events/${encodeURIComponent(e.public_token || '')}/delete">Delete</a>
                   </div>
                 </div>
-              `).join('')}
+              `;
+              }).join('')}
             </div>`
           : `
             <div class="empty-state">
@@ -206,6 +238,11 @@ router.get('/admin/events/new', (req, res) => {
 
             <div class="field-row">
               <div class="field">
+                <label for="event_date">Event Date</label>
+                <input id="event_date" name="event_date" type="date" />
+              </div>
+
+              <div class="field">
                 <label for="primary_color">Primary Colour</label>
                 <input id="primary_color" name="primary_color" type="color" value="#1f3c88" />
               </div>
@@ -229,6 +266,7 @@ router.get('/admin/events/new', (req, res) => {
 
 router.post('/admin/events/new', async (req, res) => {
   const name = (req.body.name || '').trim();
+  const eventDate = parseEventDateInput(req.body.event_date);
   const primaryColor = normalizeHexColor(req.body.primary_color, '#1f3c88');
   const tertiaryColor = normalizeHexColor(req.body.tertiary_color, '#eef3ff');
 
@@ -251,10 +289,10 @@ router.post('/admin/events/new', async (req, res) => {
 
     await pool.query(
       `
-      INSERT INTO events (name, public_token, is_published, primary_color, tertiary_color)
-      VALUES ($1, $2, false, $3, $4)
+      INSERT INTO events (name, public_token, is_published, primary_color, tertiary_color, event_date)
+      VALUES ($1, $2, false, $3, $4, $5)
       `,
-      [name, token, primaryColor, tertiaryColor]
+      [name, token, primaryColor, tertiaryColor, eventDate]
     );
 
     res.redirect(`/admin/events/${encodeURIComponent(token)}`);
@@ -317,6 +355,10 @@ router.get('/admin/events/:token', async (req, res) => {
               <div class="stat">
                 <div class="stat-label">Public Token</div>
                 <div class="small"><span class="code-line">${escapeHtml(event.public_token)}</span></div>
+              </div>
+              <div class="stat">
+                <div class="stat-label">Event Date</div>
+                <div class="small">${escapeHtml(formatDate(event.event_date))}</div>
               </div>
               <div class="stat">
                 <div class="stat-label">Last Import</div>
@@ -392,6 +434,16 @@ router.get('/admin/events/:token', async (req, res) => {
 
             <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/branding">
               <div class="field-row">
+                <div class="field">
+                  <label for="event_date">Event Date</label>
+                  <input
+                    id="event_date"
+                    name="event_date"
+                    type="date"
+                    value="${event.event_date ? escapeHtml(String(event.event_date).slice(0, 10)) : ''}"
+                  />
+                </div>
+
                 <div class="field">
                   <label for="primary_color">Primary Colour</label>
                   <input
@@ -473,14 +525,15 @@ router.post('/admin/events/:token/branding', async (req, res) => {
 
     const primaryColor = normalizeHexColor(req.body.primary_color, '#1f3c88');
     const tertiaryColor = normalizeHexColor(req.body.tertiary_color, '#eef3ff');
+    const eventDate = parseEventDateInput(req.body.event_date);
 
     await pool.query(
       `
       UPDATE events
-      SET primary_color = $2, tertiary_color = $3
+      SET primary_color = $2, tertiary_color = $3, event_date = $4
       WHERE public_token = $1
       `,
-      [token, primaryColor, tertiaryColor]
+      [token, primaryColor, tertiaryColor, eventDate]
     );
 
     res.redirect(`/admin/events/${encodeURIComponent(token)}`);

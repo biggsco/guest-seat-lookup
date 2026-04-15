@@ -333,6 +333,12 @@ button.danger {
   margin-bottom: 4px;
 }
 
+.card.past-event {
+  background: #f2f4f7;
+  border-color: #cfd6e0;
+  opacity: 0.88;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -354,6 +360,13 @@ button.danger {
 .badge.draft {
   background: #f2f4f8;
   color: #58657b;
+}
+
+.badge.past-ready {
+  margin-top: 8px;
+  background: #eceff4;
+  color: #5f6879;
+  border-color: #ccd5e3;
 }
 
 .stats {

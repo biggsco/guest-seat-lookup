@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const { pool, testDb } = require('../db');
 const { escapeHtml, renderLayout } = require('../render');
+const { formatDateTime } = require('../lib/formatting');
 
 const router = express.Router();
 
@@ -44,7 +45,8 @@ router.get('/health', async (req, res) => {
       ok: true,
       app: 'guest-seat-lookup',
       db: 'connected',
-      time: db.now
+      time: db.now,
+      adelaideTime: formatDateTime(db.now)
     });
   } catch (err) {
     res.status(500).json({
@@ -65,6 +67,7 @@ router.get('/setup', async (req, res) => {
         logo_url TEXT,
         primary_color TEXT,
         tertiary_color TEXT,
+        event_date DATE,
         last_imported_at TIMESTAMP,
         last_import_file_name TEXT,
         created_at TIMESTAMP DEFAULT NOW()
@@ -114,6 +117,11 @@ router.get('/setup', async (req, res) => {
     await pool.query(`
       ALTER TABLE events
       ADD COLUMN IF NOT EXISTS tertiary_color TEXT;
+    `);
+
+    await pool.query(`
+      ALTER TABLE events
+      ADD COLUMN IF NOT EXISTS event_date DATE;
     `);
 
     await pool.query(`
