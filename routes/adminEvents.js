@@ -22,7 +22,6 @@ const {
 } = require('../lib/uploads');
 
 const router = express.Router();
-
 router.use('/admin', requireAdmin);
 
 const uploadSessions = new Map();
@@ -132,6 +131,12 @@ router.get('/admin/events', async (req, res) => {
                     </div>
                   </div>
 
+                  ${
+                    e.logo_url
+                      ? `<div style="margin: 12px 0 6px;"><img src="${escapeHtml(e.logo_url)}" alt="Logo" style="max-width: 56px; max-height: 56px; border-radius: 8px; display: block;" /></div>`
+                      : ''
+                  }
+
                   <div class="stats">
                     <div class="stat">
                       <div class="stat-label">Guests</div>
@@ -177,7 +182,9 @@ router.get('/admin/events', async (req, res) => {
 
     res.send(renderLayout('Admin Events', body));
   } catch (err) {
-    res.status(500).send(renderLayout('Error', `<div class="notice danger">${escapeHtml(err.message)}</div>`));
+    res.status(500).send(
+      renderLayout('Error', `<div class="notice danger">${escapeHtml(err.message)}</div>`)
+    );
   }
 });
 
@@ -190,6 +197,7 @@ router.get('/admin/events/new', (req, res) => {
 
         <div class="panel" style="max-width: 720px; margin: 0 auto;">
           <h1 style="margin-top: 0;">Create Event</h1>
+
           <form method="POST" action="/admin/events/new">
             <div class="field">
               <label for="name">Event Name</label>
@@ -231,16 +239,13 @@ router.post('/admin/events/new', async (req, res) => {
   try {
     let token = generateToken();
 
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 10; i += 1) {
       const existing = await pool.query(
         `SELECT id FROM events WHERE public_token = $1`,
         [token]
       );
 
-      if (existing.rows.length === 0) {
-        break;
-      }
-
+      if (existing.rows.length === 0) break;
       token = generateToken();
     }
 
@@ -265,7 +270,9 @@ router.get('/admin/events/:token', async (req, res) => {
     const event = await getEventByToken(token);
 
     if (!event) {
-      return res.status(404).send(renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`));
+      return res.status(404).send(
+        renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`)
+      );
     }
 
     const recentGuestsResult = await pool.query(
@@ -288,7 +295,7 @@ router.get('/admin/events/:token', async (req, res) => {
       <div class="hero">
         <div>
           <h1>${escapeHtml(event.name)}</h1>
-          <p>Manage event status, upload a new guest list, update branding, and monitor what is currently live.</p>
+          <p>Manage event status, branding, uploads, and guest imports.</p>
         </div>
         <div>
           <span class="badge ${event.is_published ? 'published' : 'draft'}">
@@ -451,7 +458,9 @@ router.get('/admin/events/:token', async (req, res) => {
 
     res.send(renderLayout(`Manage ${event.name}`, body, { fullWidth: true }));
   } catch (err) {
-    res.status(500).send(renderLayout('Error', `<div class="notice danger">${escapeHtml(err.message)}</div>`));
+    res.status(500).send(
+      renderLayout('Error', `<div class="notice danger">${escapeHtml(err.message)}</div>`)
+    );
   }
 });
 
@@ -460,10 +469,7 @@ router.post('/admin/events/:token/branding', async (req, res) => {
 
   try {
     const event = await getEventByToken(token);
-
-    if (!event) {
-      return res.status(404).send('Event not found');
-    }
+    if (!event) return res.status(404).send('Event not found');
 
     const primaryColor = normalizeHexColor(req.body.primary_color, '#1f3c88');
     const tertiaryColor = normalizeHexColor(req.body.tertiary_color, '#eef3ff');
@@ -471,9 +477,7 @@ router.post('/admin/events/:token/branding', async (req, res) => {
     await pool.query(
       `
       UPDATE events
-      SET
-        primary_color = $2,
-        tertiary_color = $3
+      SET primary_color = $2, tertiary_color = $3
       WHERE public_token = $1
       `,
       [token, primaryColor, tertiaryColor]
@@ -490,14 +494,8 @@ router.post('/admin/events/:token/logo', logoUpload.single('logoFile'), async (r
 
   try {
     const event = await getEventByToken(token);
-
-    if (!event) {
-      return res.status(404).send('Event not found');
-    }
-
-    if (!req.file) {
-      return res.status(400).send('No logo file uploaded');
-    }
+    if (!event) return res.status(404).send('Event not found');
+    if (!req.file) return res.status(400).send('No logo file uploaded');
 
     const dataUrl = imageBufferToDataUrl(req.file);
 
@@ -540,9 +538,10 @@ router.get('/admin/events/:token/upload', async (req, res) => {
 
   try {
     const event = await getEventByToken(token);
-
     if (!event) {
-      return res.status(404).send(renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`));
+      return res.status(404).send(
+        renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`)
+      );
     }
 
     const body = `
@@ -584,7 +583,9 @@ router.get('/admin/events/:token/upload', async (req, res) => {
 
     res.send(renderLayout(`Upload File - ${event.name}`, body));
   } catch (err) {
-    res.status(500).send(renderLayout('Error', `<div class="notice danger">${escapeHtml(err.message)}</div>`));
+    res.status(500).send(
+      renderLayout('Error', `<div class="notice danger">${escapeHtml(err.message)}</div>`)
+    );
   }
 });
 
@@ -594,24 +595,13 @@ router.post('/admin/events/:token/upload', guestUpload.single('guestFile'), asyn
 
   try {
     const event = await getEventByToken(token);
-
-    if (!event) {
-      return res.status(404).send('Invalid event');
-    }
-
-    if (!req.file) {
-      return res.status(400).send('No file uploaded');
-    }
+    if (!event) return res.status(404).send('Invalid event');
+    if (!req.file) return res.status(400).send('No file uploaded');
 
     const parsed = parseWorkbookFromBuffer(req.file.buffer, req.file.originalname);
 
-    if (!parsed.headers.length) {
-      return res.status(400).send('No columns found');
-    }
-
-    if (!parsed.rows.length) {
-      return res.status(400).send('No guest rows found');
-    }
+    if (!parsed.headers.length) return res.status(400).send('No columns found');
+    if (!parsed.rows.length) return res.status(400).send('No guest rows found');
 
     const uploadToken = generateUploadToken();
 
@@ -747,10 +737,7 @@ router.post('/admin/uploads/:uploadToken/import', async (req, res) => {
     await pool.query('BEGIN');
 
     if (sessionState.importMode === 'replace') {
-      await pool.query(
-        `DELETE FROM guests WHERE event_id = $1`,
-        [sessionState.eventId]
-      );
+      await pool.query(`DELETE FROM guests WHERE event_id = $1`, [sessionState.eventId]);
     }
 
     let imported = 0;
@@ -792,9 +779,7 @@ router.post('/admin/uploads/:uploadToken/import', async (req, res) => {
     await pool.query(
       `
       UPDATE events
-      SET
-        last_imported_at = NOW(),
-        last_import_file_name = $2
+      SET last_imported_at = NOW(), last_import_file_name = $2
       WHERE id = $1
       `,
       [sessionState.eventId, sessionState.originalName]
@@ -831,7 +816,6 @@ router.post('/admin/uploads/:uploadToken/import', async (req, res) => {
     } catch (rollbackErr) {
       console.error('Rollback failed:', rollbackErr);
     }
-
     res.status(500).send(escapeHtml(err.message));
   }
 });
@@ -842,9 +826,7 @@ router.get('/admin/events/:token/publish', async (req, res) => {
   try {
     const event = await getEventByToken(token);
 
-    if (!event) {
-      return res.status(404).send('Event not found');
-    }
+    if (!event) return res.status(404).send('Event not found');
 
     if (event.guest_count < 1) {
       return res.status(400).send(
@@ -902,10 +884,7 @@ router.get('/admin/events/:token/clear', async (req, res) => {
 
   try {
     const event = await getEventByToken(token);
-
-    if (!event) {
-      return res.status(404).send('Event not found');
-    }
+    if (!event) return res.status(404).send('Event not found');
 
     res.send(
       renderLayout(
@@ -947,27 +926,11 @@ router.post('/admin/events/:token/clear', async (req, res) => {
 
   try {
     const event = await getEventByToken(token);
-
-    if (!event) {
-      return res.status(404).send('Event not found');
-    }
+    if (!event) return res.status(404).send('Event not found');
 
     await pool.query('BEGIN');
-
-    await pool.query(
-      `DELETE FROM guests WHERE event_id = $1`,
-      [event.id]
-    );
-
-    await pool.query(
-      `
-      UPDATE events
-      SET is_published = false
-      WHERE id = $1
-      `,
-      [event.id]
-    );
-
+    await pool.query(`DELETE FROM guests WHERE event_id = $1`, [event.id]);
+    await pool.query(`UPDATE events SET is_published = false WHERE id = $1`, [event.id]);
     await pool.query('COMMIT');
 
     res.send(
@@ -990,7 +953,6 @@ router.post('/admin/events/:token/clear', async (req, res) => {
     } catch (rollbackErr) {
       console.error('Rollback failed:', rollbackErr);
     }
-
     res.status(500).send(escapeHtml(err.message));
   }
 });
@@ -1000,10 +962,7 @@ router.get('/admin/events/:token/delete', async (req, res) => {
 
   try {
     const event = await getEventByToken(token);
-
-    if (!event) {
-      return res.status(404).send('Event not found');
-    }
+    if (!event) return res.status(404).send('Event not found');
 
     res.send(
       renderLayout(
@@ -1045,10 +1004,7 @@ router.post('/admin/events/:token/delete', async (req, res) => {
 
   try {
     const event = await getEventByToken(token);
-
-    if (!event) {
-      return res.status(404).send('Event not found');
-    }
+    if (!event) return res.status(404).send('Event not found');
 
     await pool.query('BEGIN');
     await pool.query(`DELETE FROM guests WHERE event_id = $1`, [event.id]);
@@ -1075,7 +1031,6 @@ router.post('/admin/events/:token/delete', async (req, res) => {
     } catch (rollbackErr) {
       console.error('Rollback failed:', rollbackErr);
     }
-
     res.status(500).send(escapeHtml(err.message));
   }
 });
