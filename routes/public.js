@@ -21,14 +21,6 @@ router.get('/', (req, res) => {
 
         <div class="grid cards">
           <div class="card">
-            <h2>Admin</h2>
-            <p class="muted">Log in to manage events, upload guest files, and publish search pages.</p>
-            <div class="actions">
-              <a class="button" href="/admin/events">Open Admin</a>
-            </div>
-          </div>
-
-          <div class="card">
             <h2>System Status</h2>
             <p class="muted">Check database connectivity and basic app health.</p>
             <div class="actions">

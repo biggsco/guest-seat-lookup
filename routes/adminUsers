@@ -2,17 +2,18 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const { pool } = require('../db');
 const { escapeHtml, renderLayout } = require('../render');
-const { requireAdmin, adminNav } = require('../lib/auth');
+const { requireAdmin, requireSuperAdmin, adminNav } = require('../lib/auth');
 const { formatDateTime } = require('../lib/formatting');
 
 const router = express.Router();
 
 router.use('/admin', requireAdmin);
+router.use('/admin/users', requireSuperAdmin);
 
 async function getAdminByUsername(username) {
   const result = await pool.query(
     `
-    SELECT id, username, password_hash, created_at
+    SELECT id, username, password_hash, is_super_admin, created_at
     FROM admins
     WHERE username = $1
     `,
@@ -22,23 +23,50 @@ async function getAdminByUsername(username) {
   return result.rows[0] || null;
 }
 
+async function ensureAtLeastOneSuperAdmin() {
+  const result = await pool.query(
+    `
+    SELECT COUNT(*)::INT AS count
+    FROM admins
+    WHERE is_super_admin = true
+    `
+  );
+
+  if (Number(result.rows[0]?.count || 0) > 0) {
+    return;
+  }
+
+  await pool.query(
+    `
+    UPDATE admins
+    SET is_super_admin = true
+    WHERE id = (
+      SELECT id
+      FROM admins
+      ORDER BY created_at ASC, id ASC
+      LIMIT 1
+    )
+    `
+  );
+}
+
 router.get('/admin/users', async (req, res) => {
   try {
     const result = await pool.query(
       `
-      SELECT id, username, created_at
+      SELECT id, username, is_super_admin, created_at
       FROM admins
       ORDER BY created_at ASC, id ASC
       `
     );
 
     const body = `
-      ${adminNav([{ href: '/admin/events', label: 'Back to Events' }])}
+      ${adminNav(req, [{ href: '/admin/events', label: 'Back to Events' }])}
 
       <div class="hero">
         <div>
           <h1>Admin Users</h1>
-          <p>Create additional admin users for event management.</p>
+          <p>Super admins can create users, promote roles, reset passwords, and delete users.</p>
         </div>
         <div class="actions" style="margin-top: 0;">
           <a class="button" href="/admin/users/new">Create Admin User</a>
@@ -54,16 +82,38 @@ router.get('/admin/users', async (req, res) => {
                   <thead>
                     <tr>
                       <th>Username</th>
+                      <th>Role</th>
                       <th>Created</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    ${result.rows.map(user => `
-                      <tr>
-                        <td>${escapeHtml(user.username)}</td>
-                        <td>${escapeHtml(formatDateTime(user.created_at))}</td>
-                      </tr>
-                    `).join('')}
+                    ${result.rows.map(user => {
+                      const isSelf = Number(user.id) === Number(req.session.adminUser.id);
+
+                      return `
+                        <tr>
+                          <td>${escapeHtml(user.username)}</td>
+                          <td>${user.is_super_admin ? 'Super Admin' : 'Admin'}</td>
+                          <td>${escapeHtml(formatDateTime(user.created_at))}</td>
+                          <td>
+                            <div class="actions" style="margin-top: 0;">
+                              ${
+                                user.is_super_admin
+                                  ? `<a class="button secondary" href="/admin/users/${user.id}/demote">Demote</a>`
+                                  : `<a class="button secondary" href="/admin/users/${user.id}/promote">Promote</a>`
+                              }
+                              <a class="button secondary" href="/admin/users/${user.id}/password">Reset Password</a>
+                              ${
+                                isSelf
+                                  ? '<span class="muted small">Current user</span>'
+                                  : `<a class="button danger" href="/admin/users/${user.id}/delete">Delete</a>`
+                              }
+                            </div>
+                          </td>
+                        </tr>
+                      `;
+                    }).join('')}
                   </tbody>
                 </table>
               </div>
@@ -86,7 +136,7 @@ router.get('/admin/users/new', (req, res) => {
     renderLayout(
       'Create Admin User',
       `
-        ${adminNav([{ href: '/admin/users', label: 'Back to Admin Users' }])}
+        ${adminNav(req, [{ href: '/admin/users', label: 'Back to Admin Users' }])}
 
         <div class="panel" style="max-width: 720px; margin: 0 auto;">
           <h1 style="margin-top: 0;">Create Admin User</h1>
@@ -100,6 +150,10 @@ router.get('/admin/users/new', (req, res) => {
             <div class="field">
               <label for="password">Password</label>
               <input id="password" type="password" name="password" required />
+            </div>
+
+            <div class="field">
+              <label><input type="checkbox" name="is_super_admin" value="1" /> Super admin</label>
             </div>
 
             <div class="actions">
@@ -116,54 +170,173 @@ router.get('/admin/users/new', (req, res) => {
 router.post('/admin/users/new', async (req, res) => {
   const username = (req.body.username || '').trim();
   const password = String(req.body.password || '');
+  const isSuperAdmin = req.body.is_super_admin === '1';
 
   if (!username || !password) {
-    return res.status(400).send(
-      renderLayout(
-        'Create Admin User',
-        `
-          <div class="panel" style="max-width: 720px; margin: 0 auto;">
-            <h1 style="margin-top: 0;">Create Admin User</h1>
-            <div class="notice danger">Username and password are required.</div>
-            <div class="actions">
-              <a class="button secondary" href="/admin/users/new">Try Again</a>
-            </div>
-          </div>
-        `
-      )
-    );
+    return res.status(400).send('Username and password are required.');
+  }
+
+  if (password.length < 8) {
+    return res.status(400).send('Password must be at least 8 characters.');
   }
 
   try {
     const existing = await getAdminByUsername(username);
 
     if (existing) {
-      return res.status(400).send(
-        renderLayout(
-          'Create Admin User',
-          `
-            <div class="panel" style="max-width: 720px; margin: 0 auto;">
-              <h1 style="margin-top: 0;">Create Admin User</h1>
-              <div class="notice danger">That username already exists.</div>
-              <div class="actions">
-                <a class="button secondary" href="/admin/users/new">Try Again</a>
-              </div>
-            </div>
-          `
-        )
-      );
+      return res.status(400).send('That username already exists.');
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
 
     await pool.query(
       `
-      INSERT INTO admins (username, password_hash)
-      VALUES ($1, $2)
+      INSERT INTO admins (username, password_hash, is_super_admin)
+      VALUES ($1, $2, $3)
       `,
-      [username, passwordHash]
+      [username, passwordHash, isSuperAdmin]
     );
 
+    res.redirect('/admin/users');
+  } catch (err) {
+    res.status(500).send(escapeHtml(err.message));
+  }
+});
+
+router.get('/admin/users/:id/promote', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).send('Invalid admin id.');
+
+  try {
+    await pool.query(
+      `
+      UPDATE admins
+      SET is_super_admin = true
+      WHERE id = $1
+      `,
+      [id]
+    );
+
+    res.redirect('/admin/users');
+  } catch (err) {
+    res.status(500).send(escapeHtml(err.message));
+  }
+});
+
+router.get('/admin/users/:id/demote', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).send('Invalid admin id.');
+
+  if (id === Number(req.session.adminUser.id)) {
+    return res.status(400).send('You cannot demote yourself.');
+  }
+
+  try {
+    await pool.query(
+      `
+      UPDATE admins
+      SET is_super_admin = false
+      WHERE id = $1
+      `,
+      [id]
+    );
+
+    await ensureAtLeastOneSuperAdmin();
+    res.redirect('/admin/users');
+  } catch (err) {
+    res.status(500).send(escapeHtml(err.message));
+  }
+});
+
+router.get('/admin/users/:id/password', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).send('Invalid admin id.');
+
+  try {
+    const result = await pool.query(
+      `
+      SELECT id, username
+      FROM admins
+      WHERE id = $1
+      `,
+      [id]
+    );
+
+    const user = result.rows[0];
+    if (!user) return res.status(404).send('Admin not found.');
+
+    res.send(
+      renderLayout(
+        'Reset Password',
+        `
+          ${adminNav(req, [{ href: '/admin/users', label: 'Back to Admin Users' }])}
+
+          <div class="panel" style="max-width: 620px; margin: 0 auto;">
+            <h1 style="margin-top: 0;">Reset Password</h1>
+            <p class="muted">Set a new password for <strong>${escapeHtml(user.username)}</strong>.</p>
+
+            <form method="POST" action="/admin/users/${id}/password">
+              <div class="field">
+                <label for="new_password">New Password</label>
+                <input id="new_password" type="password" name="new_password" required />
+              </div>
+              <div class="actions">
+                <button type="submit">Save Password</button>
+                <a class="button secondary" href="/admin/users">Cancel</a>
+              </div>
+            </form>
+          </div>
+        `
+      )
+    );
+  } catch (err) {
+    res.status(500).send(escapeHtml(err.message));
+  }
+});
+
+router.post('/admin/users/:id/password', async (req, res) => {
+  const id = Number(req.params.id);
+  const newPassword = String(req.body.new_password || '');
+
+  if (!id) return res.status(400).send('Invalid admin id.');
+  if (newPassword.length < 8) return res.status(400).send('Password must be at least 8 characters.');
+
+  try {
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    await pool.query(
+      `
+      UPDATE admins
+      SET password_hash = $2
+      WHERE id = $1
+      `,
+      [id, passwordHash]
+    );
+
+    res.redirect('/admin/users');
+  } catch (err) {
+    res.status(500).send(escapeHtml(err.message));
+  }
+});
+
+router.get('/admin/users/:id/delete', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).send('Invalid admin id.');
+
+  if (id === Number(req.session.adminUser.id)) {
+    return res.status(400).send('You cannot delete yourself.');
+  }
+
+  try {
+    await pool.query(
+      `
+      DELETE FROM admins
+      WHERE id = $1
+      `,
+      [id]
+    );
+
+    await ensureAtLeastOneSuperAdmin();
     res.redirect('/admin/users');
   } catch (err) {
     res.status(500).send(escapeHtml(err.message));

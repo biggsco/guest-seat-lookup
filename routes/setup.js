@@ -1,8 +1,64 @@
 const express = require('express');
+const bcrypt = require('bcryptjs');
 const { pool, testDb } = require('../db');
 const { escapeHtml, renderLayout } = require('../render');
+const { formatDateTime } = require('../lib/formatting');
 
 const router = express.Router();
+
+async function ensureInitialAdmin() {
+  const username = (process.env.ADMIN_USERNAME || '').trim();
+  const password = String(process.env.ADMIN_PASSWORD || '');
+
+  const existingAdmins = await pool.query(`
+    SELECT COUNT(*)::INT AS count
+    FROM admins;
+  `);
+  const adminCount = Number(existingAdmins.rows[0]?.count || 0);
+
+  if (adminCount > 0) {
+    return { status: 'existing' };
+  }
+
+  if (!username || !password) {
+    return { status: 'missing-env' };
+  }
+
+  const passwordHash = await bcrypt.hash(password, 12);
+
+  await pool.query(
+    `
+    INSERT INTO admins (username, password_hash, is_super_admin)
+    VALUES ($1, $2, true)
+    `,
+    [username, passwordHash]
+  );
+
+  return { status: 'created', username };
+}
+
+async function ensureAtLeastOneSuperAdmin() {
+  const result = await pool.query(`
+    SELECT COUNT(*)::INT AS count
+    FROM admins
+    WHERE is_super_admin = true;
+  `);
+
+  if (Number(result.rows[0]?.count || 0) > 0) {
+    return;
+  }
+
+  await pool.query(`
+    UPDATE admins
+    SET is_super_admin = true
+    WHERE id = (
+      SELECT id
+      FROM admins
+      ORDER BY created_at ASC, id ASC
+      LIMIT 1
+    );
+  `);
+}
 
 router.get('/health', async (req, res) => {
   try {
@@ -12,7 +68,8 @@ router.get('/health', async (req, res) => {
       ok: true,
       app: 'guest-seat-lookup',
       db: 'connected',
-      time: db.now
+      time: db.now,
+      adelaideTime: formatDateTime(db.now)
     });
   } catch (err) {
     res.status(500).json({
@@ -33,6 +90,7 @@ router.get('/setup', async (req, res) => {
         logo_url TEXT,
         primary_color TEXT,
         tertiary_color TEXT,
+        event_date DATE,
         last_imported_at TIMESTAMP,
         last_import_file_name TEXT,
         created_at TIMESTAMP DEFAULT NOW()
@@ -55,6 +113,7 @@ router.get('/setup', async (req, res) => {
         id SERIAL PRIMARY KEY,
         username TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
+        is_super_admin BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
@@ -82,6 +141,11 @@ router.get('/setup', async (req, res) => {
     await pool.query(`
       ALTER TABLE events
       ADD COLUMN IF NOT EXISTS tertiary_color TEXT;
+    `);
+
+    await pool.query(`
+      ALTER TABLE events
+      ADD COLUMN IF NOT EXISTS event_date DATE;
     `);
 
     await pool.query(`
@@ -115,6 +179,11 @@ router.get('/setup', async (req, res) => {
     `);
 
     await pool.query(`
+      ALTER TABLE admins
+      ADD COLUMN IF NOT EXISTS is_super_admin BOOLEAN DEFAULT false;
+    `);
+
+    await pool.query(`
       UPDATE events
       SET primary_color = '#1f3c88'
       WHERE primary_color IS NULL OR primary_color = '';
@@ -136,6 +205,25 @@ router.get('/setup', async (req, res) => {
       ON admins(username);
     `);
 
+    const initialAdminResult = await ensureInitialAdmin();
+    await ensureAtLeastOneSuperAdmin();
+    const initialAdminMessage = initialAdminResult.status === 'created'
+      ? `
+        <div class="notice info" style="margin-bottom: 14px;">
+          Initial super admin user <strong>${escapeHtml(initialAdminResult.username)}</strong> was created from
+          <span class="code-line">ADMIN_USERNAME</span> and <span class="code-line">ADMIN_PASSWORD</span>.
+        </div>
+      `
+      : initialAdminResult.status === 'missing-env'
+        ? `
+          <div class="notice warning" style="margin-bottom: 14px;">
+            No admin users exist yet. Set <span class="code-line">ADMIN_USERNAME</span> and
+            <span class="code-line">ADMIN_PASSWORD</span>, then re-run <span class="code-line">/setup</span>
+            to create the first admin account.
+          </div>
+        `
+        : '';
+
     res.send(
       renderLayout(
         'Setup Complete',
@@ -143,6 +231,7 @@ router.get('/setup', async (req, res) => {
           <div class="panel" style="max-width: 760px; margin: 0 auto;">
             <h1 style="margin-top: 0;">Setup Complete</h1>
             <p class="muted">Database tables, branding fields, admin auth, and session storage are ready.</p>
+            ${initialAdminMessage}
             <div class="actions">
               <a class="button" href="/admin/login">Go to Admin Login</a>
             </div>
