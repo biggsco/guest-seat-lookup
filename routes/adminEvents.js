@@ -52,6 +52,12 @@ function isPastEvent(eventDate) {
   return date < nowInAdelaide;
 }
 
+function getPublicSearchUrl(req, token) {
+  const configuredBaseUrl = String(process.env.PUBLIC_BASE_URL || '').trim().replace(/\/+$/, '');
+  const baseUrl = configuredBaseUrl || `${req.protocol}://${req.get('host')}`;
+  return `${baseUrl}/e/${encodeURIComponent(token)}`;
+}
+
 async function getEventByToken(token) {
   const result = await pool.query(
     `
@@ -324,6 +330,9 @@ router.get('/admin/events/:token', async (req, res) => {
       [event.id]
     );
 
+    const publicSearchUrl = getPublicSearchUrl(req, event.public_token);
+    const publicSearchQrCode = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(publicSearchUrl)}`;
+
     const body = `
       ${adminNav(req, [
         { href: '/admin/events', label: 'Back to Events' },
@@ -494,6 +503,21 @@ router.get('/admin/events/:token', async (req, res) => {
             <div class="actions">
               <a class="button secondary" href="/e/${encodeURIComponent(event.public_token)}">View Search</a>
               <a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/upload">Upload File</a>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h2>Public Search QR Code</h2>
+            <p class="muted">Scan this code to open the public search page for this event.</p>
+            <div class="qr-panel">
+              <img
+                class="qr-image"
+                src="${publicSearchQrCode}"
+                alt="QR code for ${escapeHtml(event.name)} public search page"
+              />
+            </div>
+            <div class="small" style="margin-top: 10px;">
+              URL: <a href="${escapeHtml(publicSearchUrl)}">${escapeHtml(publicSearchUrl)}</a>
             </div>
           </div>
 

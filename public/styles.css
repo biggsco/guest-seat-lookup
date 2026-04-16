@@ -334,9 +334,8 @@ button.danger {
 }
 
 .card.past-event {
-  background: #f2f4f7;
-  border-color: #cfd6e0;
-  opacity: 0.88;
+  background: #fff1f3;
+  border-color: #efb7c2;
 }
 
 .badge {
@@ -364,9 +363,23 @@ button.danger {
 
 .badge.past-ready {
   margin-top: 8px;
-  background: #eceff4;
-  color: #5f6879;
-  border-color: #ccd5e3;
+  background: #ffe9ee;
+  color: #b12849;
+  border-color: #f4c0cd;
+}
+
+.qr-panel {
+  display: inline-flex;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #fff;
+}
+
+.qr-image {
+  width: 220px;
+  height: 220px;
+  display: block;
 }
 
 .stats {
