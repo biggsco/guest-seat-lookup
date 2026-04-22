@@ -25,7 +25,6 @@ router.get('/', (req, res) => {
             <p class="muted">Check database connectivity and basic app health.</p>
             <div class="actions">
               <a class="button secondary" href="/health">Health Check</a>
-              <a class="button secondary" href="/setup">Setup / Update DB</a>
             </div>
           </div>
         </div>
@@ -69,7 +68,8 @@ router.get('/e/:token', async (req, res) => {
         public_token,
         logo_url,
         primary_color,
-        tertiary_color
+        tertiary_color,
+        venue
       FROM events
       WHERE public_token = $1
         AND is_published = true

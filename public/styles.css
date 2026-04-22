@@ -334,8 +334,9 @@ button.danger {
 }
 
 .card.past-event {
-  background: #fff1f3;
-  border-color: #efb7c2;
+  background: #f3f4f7;
+  border-color: #cfd5df;
+  color: #5e6675;
 }
 
 .badge {
@@ -363,9 +364,9 @@ button.danger {
 
 .badge.past-ready {
   margin-top: 8px;
-  background: #ffe9ee;
-  color: #b12849;
-  border-color: #f4c0cd;
+  background: #eceff5;
+  color: #596273;
+  border-color: #ccd3df;
 }
 
 .qr-panel {

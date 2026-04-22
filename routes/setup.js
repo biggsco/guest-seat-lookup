@@ -80,6 +80,10 @@ router.get('/health', async (req, res) => {
 });
 
 router.get('/setup', async (req, res) => {
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_SETUP_ROUTE !== 'true') {
+    return res.status(404).send('Not Found');
+  }
+
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS events (
@@ -90,6 +94,7 @@ router.get('/setup', async (req, res) => {
         logo_url TEXT,
         primary_color TEXT,
         tertiary_color TEXT,
+        venue TEXT,
         event_date DATE,
         last_imported_at TIMESTAMP,
         last_import_file_name TEXT,
@@ -141,6 +146,11 @@ router.get('/setup', async (req, res) => {
     await pool.query(`
       ALTER TABLE events
       ADD COLUMN IF NOT EXISTS tertiary_color TEXT;
+    `);
+
+    await pool.query(`
+      ALTER TABLE events
+      ADD COLUMN IF NOT EXISTS venue TEXT;
     `);
 
     await pool.query(`

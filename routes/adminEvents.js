@@ -26,6 +26,11 @@ const router = express.Router();
 router.use('/admin', requireAdmin);
 
 const uploadSessions = new Map();
+const VENUE_OPTIONS = [
+  'Adelaide Convention Centre',
+  'Adelaide Entertainment Centre',
+  'The Drive'
+];
 
 function generateToken() {
   return Math.random().toString(36).slice(2, 10);
@@ -37,6 +42,23 @@ function parseEventDateInput(value) {
   const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return null;
   return raw;
+}
+
+function parseVenueInput(value) {
+  const venue = String(value || '').trim();
+  if (!venue) return null;
+  return VENUE_OPTIONS.includes(venue) ? venue : null;
+}
+
+function renderVenueOptions(selectedVenue) {
+  return `
+    <option value="">Select a venue</option>
+    ${VENUE_OPTIONS.map(venue => `
+      <option value="${escapeHtml(venue)}" ${venue === selectedVenue ? 'selected' : ''}>
+        ${escapeHtml(venue)}
+      </option>
+    `).join('')}
+  `;
 }
 
 function isPastEvent(eventDate) {
@@ -69,6 +91,7 @@ async function getEventByToken(token) {
       e.logo_url,
       e.primary_color,
       e.tertiary_color,
+      e.venue,
       e.event_date,
       e.created_at,
       e.last_imported_at,
@@ -85,6 +108,7 @@ async function getEventByToken(token) {
       e.logo_url,
       e.primary_color,
       e.tertiary_color,
+      e.venue,
       e.event_date,
       e.created_at,
       e.last_imported_at,
@@ -105,25 +129,29 @@ router.get('/admin/events', async (req, res) => {
         e.name,
         e.public_token,
         e.is_published,
-        e.logo_url,
-        e.primary_color,
-        e.tertiary_color,
-        e.event_date,
+      e.logo_url,
+      e.primary_color,
+      e.tertiary_color,
+      e.venue,
+      e.event_date,
         e.created_at,
         e.last_imported_at,
         e.last_import_file_name,
         COUNT(g.id)::int AS guest_count
       FROM events e
       LEFT JOIN guests g ON g.event_id = e.id
+      WHERE e.event_date IS NULL
+        OR e.event_date >= ((NOW() AT TIME ZONE 'Australia/Adelaide')::DATE - 2)
       GROUP BY
         e.id,
         e.name,
         e.public_token,
         e.is_published,
-        e.logo_url,
-        e.primary_color,
-        e.tertiary_color,
-        e.event_date,
+      e.logo_url,
+      e.primary_color,
+      e.tertiary_color,
+      e.venue,
+      e.event_date,
         e.created_at,
         e.last_imported_at,
         e.last_import_file_name
@@ -185,6 +213,7 @@ router.get('/admin/events', async (req, res) => {
                   </div>
 
                   <div class="event-meta">
+                    <div>Venue: ${escapeHtml(e.venue || 'Not set')}</div>
                     <div>Event Date: ${escapeHtml(formatDate(e.event_date))}</div>
                     <div>Public URL: <a href="/e/${encodeURIComponent(e.public_token || '')}">/e/${escapeHtml(e.public_token || '')}</a></div>
                     <div>Updated: ${escapeHtml(formatDateTime(e.last_imported_at))}</div>
@@ -244,6 +273,13 @@ router.get('/admin/events/new', (req, res) => {
 
             <div class="field-row">
               <div class="field">
+                <label for="venue">Venue</label>
+                <select id="venue" name="venue">
+                  ${renderVenueOptions(null)}
+                </select>
+              </div>
+
+              <div class="field">
                 <label for="event_date">Event Date</label>
                 <input id="event_date" name="event_date" type="date" />
               </div>
@@ -272,6 +308,7 @@ router.get('/admin/events/new', (req, res) => {
 
 router.post('/admin/events/new', async (req, res) => {
   const name = (req.body.name || '').trim();
+  const venue = parseVenueInput(req.body.venue);
   const eventDate = parseEventDateInput(req.body.event_date);
   const primaryColor = normalizeHexColor(req.body.primary_color, '#1f3c88');
   const tertiaryColor = normalizeHexColor(req.body.tertiary_color, '#eef3ff');
@@ -295,10 +332,10 @@ router.post('/admin/events/new', async (req, res) => {
 
     await pool.query(
       `
-      INSERT INTO events (name, public_token, is_published, primary_color, tertiary_color, event_date)
-      VALUES ($1, $2, false, $3, $4, $5)
+      INSERT INTO events (name, public_token, is_published, primary_color, tertiary_color, venue, event_date)
+      VALUES ($1, $2, false, $3, $4, $5, $6)
       `,
-      [name, token, primaryColor, tertiaryColor, eventDate]
+      [name, token, primaryColor, tertiaryColor, venue, eventDate]
     );
 
     res.redirect(`/admin/events/${encodeURIComponent(token)}`);
@@ -364,6 +401,10 @@ router.get('/admin/events/:token', async (req, res) => {
               <div class="stat">
                 <div class="stat-label">Public Token</div>
                 <div class="small"><span class="code-line">${escapeHtml(event.public_token)}</span></div>
+              </div>
+              <div class="stat">
+                <div class="stat-label">Venue</div>
+                <div class="small">${escapeHtml(event.venue || 'Not set')}</div>
               </div>
               <div class="stat">
                 <div class="stat-label">Event Date</div>
@@ -443,6 +484,13 @@ router.get('/admin/events/:token', async (req, res) => {
 
             <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/branding">
               <div class="field-row">
+                <div class="field">
+                  <label for="venue">Venue</label>
+                  <select id="venue" name="venue">
+                    ${renderVenueOptions(event.venue)}
+                  </select>
+                </div>
+
                 <div class="field">
                   <label for="event_date">Event Date</label>
                   <input
@@ -549,15 +597,16 @@ router.post('/admin/events/:token/branding', async (req, res) => {
 
     const primaryColor = normalizeHexColor(req.body.primary_color, '#1f3c88');
     const tertiaryColor = normalizeHexColor(req.body.tertiary_color, '#eef3ff');
+    const venue = parseVenueInput(req.body.venue);
     const eventDate = parseEventDateInput(req.body.event_date);
 
     await pool.query(
       `
       UPDATE events
-      SET primary_color = $2, tertiary_color = $3, event_date = $4
+      SET primary_color = $2, tertiary_color = $3, venue = $4, event_date = $5
       WHERE public_token = $1
       `,
-      [token, primaryColor, tertiaryColor, eventDate]
+      [token, primaryColor, tertiaryColor, venue, eventDate]
     );
 
     res.redirect(`/admin/events/${encodeURIComponent(token)}`);
