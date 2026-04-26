@@ -4,6 +4,7 @@ const { pool } = require('../db');
 const { escapeHtml, renderLayout } = require('../render');
 const { requireAdmin, requireSuperAdmin, adminNav } = require('../lib/auth');
 const { formatDateTime } = require('../lib/formatting');
+const { VENUE_OPTIONS, parseSelectedVenues } = require('../lib/venues');
 
 const router = express.Router();
 
@@ -13,7 +14,7 @@ router.use('/admin/users', requireSuperAdmin);
 async function getAdminByUsername(username) {
   const result = await pool.query(
     `
-    SELECT id, username, password_hash, is_super_admin, created_at
+    SELECT id, username, password_hash, is_super_admin, allowed_venues, created_at
     FROM admins
     WHERE username = $1
     `,
@@ -54,7 +55,7 @@ router.get('/admin/users', async (req, res) => {
   try {
     const result = await pool.query(
       `
-      SELECT id, username, is_super_admin, created_at
+      SELECT id, username, is_super_admin, allowed_venues, created_at
       FROM admins
       ORDER BY created_at ASC, id ASC
       `
@@ -83,6 +84,7 @@ router.get('/admin/users', async (req, res) => {
                     <tr>
                       <th>Username</th>
                       <th>Role</th>
+                      <th>Venues</th>
                       <th>Created</th>
                       <th>Actions</th>
                     </tr>
@@ -95,6 +97,7 @@ router.get('/admin/users', async (req, res) => {
                         <tr>
                           <td>${escapeHtml(user.username)}</td>
                           <td>${user.is_super_admin ? 'Super Admin' : 'Admin'}</td>
+                          <td>${escapeHtml(Array.isArray(user.allowed_venues) && user.allowed_venues.length ? user.allowed_venues.join(', ') : 'No venue access')}</td>
                           <td>${escapeHtml(formatDateTime(user.created_at))}</td>
                           <td>
                             <div class="actions" style="margin-top: 0;">
@@ -103,6 +106,7 @@ router.get('/admin/users', async (req, res) => {
                                   ? `<a class="button secondary" href="/admin/users/${user.id}/demote">Demote</a>`
                                   : `<a class="button secondary" href="/admin/users/${user.id}/promote">Promote</a>`
                               }
+                              <a class="button secondary" href="/admin/users/${user.id}/venues">Venues</a>
                               <a class="button secondary" href="/admin/users/${user.id}/password">Reset Password</a>
                               ${
                                 isSelf
@@ -156,6 +160,17 @@ router.get('/admin/users/new', (req, res) => {
               <label><input type="checkbox" name="is_super_admin" value="1" /> Super admin</label>
             </div>
 
+            <div class="field">
+              <label>Venue access</label>
+              ${VENUE_OPTIONS.map(venue => `
+                <label style="display:block; margin-top:6px;">
+                  <input type="checkbox" name="allowed_venues" value="${escapeHtml(venue)}" />
+                  ${escapeHtml(venue)}
+                </label>
+              `).join('')}
+              <div class="muted small" style="margin-top: 6px;">Users will only see/manage events in selected venues.</div>
+            </div>
+
             <div class="actions">
               <button type="submit">Create Admin</button>
               <a class="button secondary" href="/admin/users">Cancel</a>
@@ -171,6 +186,8 @@ router.post('/admin/users/new', async (req, res) => {
   const username = (req.body.username || '').trim();
   const password = String(req.body.password || '');
   const isSuperAdmin = req.body.is_super_admin === '1';
+  const selectedVenues = parseSelectedVenues(req.body.allowed_venues);
+  const allowedVenues = isSuperAdmin && selectedVenues.length === 0 ? VENUE_OPTIONS : selectedVenues;
 
   if (!username || !password) {
     return res.status(400).send('Username and password are required.');
@@ -191,10 +208,10 @@ router.post('/admin/users/new', async (req, res) => {
 
     await pool.query(
       `
-      INSERT INTO admins (username, password_hash, is_super_admin)
-      VALUES ($1, $2, $3)
+      INSERT INTO admins (username, password_hash, is_super_admin, allowed_venues)
+      VALUES ($1, $2, $3, $4)
       `,
-      [username, passwordHash, isSuperAdmin]
+      [username, passwordHash, isSuperAdmin, allowedVenues]
     );
 
     res.redirect('/admin/users');
@@ -316,6 +333,90 @@ router.post('/admin/users/:id/password', async (req, res) => {
     res.redirect('/admin/users');
   } catch (err) {
     res.status(500).send(escapeHtml(err.message));
+  }
+});
+
+router.get('/admin/users/:id/venues', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).send('Invalid admin id.');
+
+  try {
+    const result = await pool.query(
+      `
+      SELECT id, username, allowed_venues
+      FROM admins
+      WHERE id = $1
+      `,
+      [id]
+    );
+
+    const user = result.rows[0];
+    if (!user) return res.status(404).send('Admin not found.');
+
+    const selectedVenues = Array.isArray(user.allowed_venues) ? user.allowed_venues : [];
+
+    return res.send(
+      renderLayout(
+        'Update Venue Access',
+        `
+          ${adminNav(req, [{ href: '/admin/users', label: 'Back to Admin Users' }])}
+          <div class="panel" style="max-width: 620px; margin: 0 auto;">
+            <h1 style="margin-top: 0;">Update Venue Access</h1>
+            <p class="muted">Set venue access for <strong>${escapeHtml(user.username)}</strong>.</p>
+
+            <form method="POST" action="/admin/users/${id}/venues">
+              <div class="field">
+                ${VENUE_OPTIONS.map(venue => `
+                  <label style="display:block; margin-top:6px;">
+                    <input
+                      type="checkbox"
+                      name="allowed_venues"
+                      value="${escapeHtml(venue)}"
+                      ${selectedVenues.includes(venue) ? 'checked' : ''}
+                    />
+                    ${escapeHtml(venue)}
+                  </label>
+                `).join('')}
+                <div class="muted small" style="margin-top: 6px;">Unchecked venues are hidden from this user.</div>
+              </div>
+
+              <div class="actions">
+                <button type="submit">Save Venue Access</button>
+                <a class="button secondary" href="/admin/users">Cancel</a>
+              </div>
+            </form>
+          </div>
+        `
+      )
+    );
+  } catch (err) {
+    return res.status(500).send(escapeHtml(err.message));
+  }
+});
+
+router.post('/admin/users/:id/venues', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).send('Invalid admin id.');
+
+  const allowedVenues = parseSelectedVenues(req.body.allowed_venues);
+
+  try {
+    await pool.query(
+      `
+      UPDATE admins
+      SET allowed_venues = $2
+      WHERE id = $1
+      `,
+      [id, allowedVenues]
+    );
+
+    if (id === Number(req.session.adminUser.id)) {
+      req.session.adminUser.allowedVenues = allowedVenues;
+    }
+
+    return res.redirect('/admin/users');
+  } catch (err) {
+    return res.status(500).send(escapeHtml(err.message));
   }
 });
 

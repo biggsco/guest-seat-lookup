@@ -9,7 +9,7 @@ const router = express.Router();
 async function getAdminByUsername(username) {
   const result = await pool.query(
     `
-    SELECT id, username, password_hash, is_super_admin
+    SELECT id, username, password_hash, is_super_admin, allowed_venues
     FROM admins
     WHERE username = $1
     `,
@@ -107,7 +107,8 @@ router.post('/admin/login', async (req, res) => {
     req.session.adminUser = {
       id: admin.id,
       username: admin.username,
-      isSuperAdmin: Boolean(admin.is_super_admin)
+      isSuperAdmin: Boolean(admin.is_super_admin),
+      allowedVenues: Array.isArray(admin.allowed_venues) ? admin.allowed_venues : []
     };
 
     return res.redirect(safeNext);

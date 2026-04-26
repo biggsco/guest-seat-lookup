@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const { pool, testDb } = require('../db');
 const { escapeHtml, renderLayout } = require('../render');
 const { formatDateTime } = require('../lib/formatting');
+const { VENUE_OPTIONS } = require('../lib/venues');
 
 const router = express.Router();
 
@@ -28,10 +29,10 @@ async function ensureInitialAdmin() {
 
   await pool.query(
     `
-    INSERT INTO admins (username, password_hash, is_super_admin)
-    VALUES ($1, $2, true)
+    INSERT INTO admins (username, password_hash, is_super_admin, allowed_venues)
+    VALUES ($1, $2, true, $3)
     `,
-    [username, passwordHash]
+    [username, passwordHash, VENUE_OPTIONS]
   );
 
   return { status: 'created', username };
@@ -119,6 +120,7 @@ router.get('/setup', async (req, res) => {
         username TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
         is_super_admin BOOLEAN DEFAULT false,
+        allowed_venues TEXT[] DEFAULT ARRAY[]::TEXT[],
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
@@ -192,6 +194,21 @@ router.get('/setup', async (req, res) => {
       ALTER TABLE admins
       ADD COLUMN IF NOT EXISTS is_super_admin BOOLEAN DEFAULT false;
     `);
+
+    await pool.query(`
+      ALTER TABLE admins
+      ADD COLUMN IF NOT EXISTS allowed_venues TEXT[] DEFAULT ARRAY[]::TEXT[];
+    `);
+
+    await pool.query(
+      `
+      UPDATE admins
+      SET allowed_venues = $1
+      WHERE is_super_admin = true
+        AND (allowed_venues IS NULL OR cardinality(allowed_venues) = 0)
+      `,
+      [VENUE_OPTIONS]
+    );
 
     await pool.query(`
       UPDATE events

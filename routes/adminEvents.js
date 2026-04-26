@@ -21,17 +21,12 @@ const {
   parseWorkbookFromBuffer,
   imageBufferToDataUrl
 } = require('../lib/uploads');
+const { VENUE_OPTIONS, canAccessVenue } = require('../lib/venues');
 
 const router = express.Router();
 router.use('/admin', requireAdmin);
 
 const uploadSessions = new Map();
-const VENUE_OPTIONS = [
-  'Adelaide Convention Centre',
-  'Adelaide Entertainment Centre',
-  'The Drive'
-];
-
 function generateToken() {
   return Math.random().toString(36).slice(2, 10);
 }
@@ -50,15 +45,32 @@ function parseVenueInput(value) {
   return VENUE_OPTIONS.includes(venue) ? venue : null;
 }
 
-function renderVenueOptions(selectedVenue) {
+function renderVenueOptions(selectedVenue, availableVenues = VENUE_OPTIONS) {
   return `
     <option value="">Select a venue</option>
-    ${VENUE_OPTIONS.map(venue => `
+    ${availableVenues.map(venue => `
       <option value="${escapeHtml(venue)}" ${venue === selectedVenue ? 'selected' : ''}>
         ${escapeHtml(venue)}
       </option>
     `).join('')}
   `;
+}
+
+function getAllowedVenuesForRequest(req) {
+  if (req.session?.adminUser?.isSuperAdmin) {
+    return VENUE_OPTIONS;
+  }
+
+  if (!Array.isArray(req.session?.adminUser?.allowedVenues)) {
+    return [];
+  }
+
+  return req.session.adminUser.allowedVenues.filter(venue => VENUE_OPTIONS.includes(venue));
+}
+
+function hasVenueAccess(req, venue) {
+  if (req.session?.adminUser?.isSuperAdmin) return true;
+  return canAccessVenue(getAllowedVenuesForRequest(req), venue);
 }
 
 function isPastEvent(eventDate) {
@@ -122,42 +134,52 @@ async function getEventByToken(token) {
 
 router.get('/admin/events', async (req, res) => {
   try {
-    const result = await pool.query(
-      `
-      SELECT
-        e.id,
-        e.name,
-        e.public_token,
-        e.is_published,
-      e.logo_url,
-      e.primary_color,
-      e.tertiary_color,
-      e.venue,
-      e.event_date,
-        e.created_at,
-        e.last_imported_at,
-        e.last_import_file_name,
-        COUNT(g.id)::int AS guest_count
-      FROM events e
-      LEFT JOIN guests g ON g.event_id = e.id
-      WHERE e.event_date IS NULL
-        OR e.event_date >= ((NOW() AT TIME ZONE 'Australia/Adelaide')::DATE - 2)
-      GROUP BY
-        e.id,
-        e.name,
-        e.public_token,
-        e.is_published,
-      e.logo_url,
-      e.primary_color,
-      e.tertiary_color,
-      e.venue,
-      e.event_date,
-        e.created_at,
-        e.last_imported_at,
-        e.last_import_file_name
-      ORDER BY e.id DESC
-      `
-    );
+    const allowedVenues = getAllowedVenuesForRequest(req);
+    let result = { rows: [] };
+
+    if (req.session.adminUser.isSuperAdmin || allowedVenues.length > 0) {
+      const venueCondition = req.session.adminUser.isSuperAdmin ? '' : 'AND e.venue = ANY($1::TEXT[])';
+      const params = req.session.adminUser.isSuperAdmin ? [] : [allowedVenues];
+
+      result = await pool.query(
+        `
+        SELECT
+          e.id,
+          e.name,
+          e.public_token,
+          e.is_published,
+          e.logo_url,
+          e.primary_color,
+          e.tertiary_color,
+          e.venue,
+          e.event_date,
+          e.created_at,
+          e.last_imported_at,
+          e.last_import_file_name,
+          COUNT(g.id)::int AS guest_count
+        FROM events e
+        LEFT JOIN guests g ON g.event_id = e.id
+        WHERE (e.event_date IS NULL
+          OR e.event_date >= ((NOW() AT TIME ZONE 'Australia/Adelaide')::DATE - 2))
+          ${venueCondition}
+        GROUP BY
+          e.id,
+          e.name,
+          e.public_token,
+          e.is_published,
+          e.logo_url,
+          e.primary_color,
+          e.tertiary_color,
+          e.venue,
+          e.event_date,
+          e.created_at,
+          e.last_imported_at,
+          e.last_import_file_name
+        ORDER BY e.id DESC
+        `,
+        params
+      );
+    }
 
     const body = `
       ${adminNav(req, [{ href: '/', label: 'Home' }])}
@@ -168,7 +190,9 @@ router.get('/admin/events', async (req, res) => {
           <p>Signed in as <strong>${escapeHtml(req.session.adminUser.username)}</strong>.</p>
         </div>
         <div class="actions" style="margin-top: 0;">
-          <a class="button" href="/admin/events/new">Create Event</a>
+          ${req.session.adminUser.isSuperAdmin || getAllowedVenuesForRequest(req).length
+            ? '<a class="button" href="/admin/events/new">Create Event</a>'
+            : '<span class="muted small">No venue access assigned</span>'}
         </div>
       </div>
 
@@ -256,6 +280,11 @@ router.get('/admin/events', async (req, res) => {
 });
 
 router.get('/admin/events/new', (req, res) => {
+  const availableVenues = getAllowedVenuesForRequest(req);
+  if (!req.session.adminUser.isSuperAdmin && availableVenues.length === 0) {
+    return res.status(403).send('No venue access is assigned to your user yet.');
+  }
+
   res.send(
     renderLayout(
       'Create Event',
@@ -275,7 +304,7 @@ router.get('/admin/events/new', (req, res) => {
               <div class="field">
                 <label for="venue">Venue</label>
                 <select id="venue" name="venue">
-                  ${renderVenueOptions(null)}
+                  ${renderVenueOptions(null, availableVenues)}
                 </select>
               </div>
 
@@ -316,6 +345,12 @@ router.post('/admin/events/new', async (req, res) => {
   if (!name) {
     return res.status(400).send('Event name is required');
   }
+  if (!venue) {
+    return res.status(400).send('Please select a venue.');
+  }
+  if (!hasVenueAccess(req, venue)) {
+    return res.status(403).send('You do not have access to that venue.');
+  }
 
   try {
     let token = generateToken();
@@ -354,6 +389,9 @@ router.get('/admin/events/:token', async (req, res) => {
       return res.status(404).send(
         renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`)
       );
+    }
+    if (!hasVenueAccess(req, event.venue)) {
+      return res.status(403).send('You do not have access to this event venue.');
     }
 
     const recentGuestsResult = await pool.query(
@@ -487,7 +525,7 @@ router.get('/admin/events/:token', async (req, res) => {
                 <div class="field">
                   <label for="venue">Venue</label>
                   <select id="venue" name="venue">
-                    ${renderVenueOptions(event.venue)}
+                    ${renderVenueOptions(event.venue, getAllowedVenuesForRequest(req))}
                   </select>
                 </div>
 
@@ -594,11 +632,18 @@ router.post('/admin/events/:token/branding', async (req, res) => {
   try {
     const event = await getEventByToken(token);
     if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) {
+      return res.status(403).send('You do not have access to this event venue.');
+    }
 
     const primaryColor = normalizeHexColor(req.body.primary_color, '#1f3c88');
     const tertiaryColor = normalizeHexColor(req.body.tertiary_color, '#eef3ff');
     const venue = parseVenueInput(req.body.venue);
     const eventDate = parseEventDateInput(req.body.event_date);
+    if (!venue) return res.status(400).send('Please select a venue.');
+    if (!hasVenueAccess(req, venue)) {
+      return res.status(403).send('You do not have access to that venue.');
+    }
 
     await pool.query(
       `
@@ -621,6 +666,7 @@ router.post('/admin/events/:token/logo', logoUpload.single('logoFile'), async (r
   try {
     const event = await getEventByToken(token);
     if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
     if (!req.file) return res.status(400).send('No logo file uploaded');
 
     const dataUrl = imageBufferToDataUrl(req.file);
@@ -644,6 +690,10 @@ router.get('/admin/events/:token/logo/remove', async (req, res) => {
   const token = req.params.token;
 
   try {
+    const event = await getEventByToken(token);
+    if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
+
     await pool.query(
       `
       UPDATE events
@@ -668,6 +718,9 @@ router.get('/admin/events/:token/upload', async (req, res) => {
       return res.status(404).send(
         renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`)
       );
+    }
+    if (!hasVenueAccess(req, event.venue)) {
+      return res.status(403).send('You do not have access to this event venue.');
     }
 
     const body = `
@@ -722,6 +775,7 @@ router.post('/admin/events/:token/upload', guestUpload.single('guestFile'), asyn
   try {
     const event = await getEventByToken(token);
     if (!event) return res.status(404).send('Invalid event');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
     if (!req.file) return res.status(400).send('No file uploaded');
 
     const parsed = parseWorkbookFromBuffer(req.file.buffer, req.file.originalname);
@@ -736,6 +790,7 @@ router.post('/admin/events/:token/upload', guestUpload.single('guestFile'), asyn
       eventId: event.id,
       eventName: event.name,
       eventToken: event.public_token,
+      venue: event.venue,
       originalName: parsed.originalName,
       sheetName: parsed.firstSheetName,
       headers: parsed.headers,
@@ -762,6 +817,9 @@ router.get('/admin/uploads/:uploadToken/map', (req, res) => {
 
   if (!sessionState) {
     return res.status(404).send('Upload session not found. Upload the file again.');
+  }
+  if (!hasVenueAccess(req, sessionState.venue)) {
+    return res.status(403).send('You do not have access to this upload.');
   }
 
   const body = `
@@ -839,6 +897,9 @@ router.post('/admin/uploads/:uploadToken/import', async (req, res) => {
 
   if (!sessionState) {
     return res.status(404).send('Upload session not found. Upload the file again.');
+  }
+  if (!hasVenueAccess(req, sessionState.venue)) {
+    return res.status(403).send('You do not have access to this upload.');
   }
 
   const fullNameIndex = req.body.full_name;
@@ -953,6 +1014,7 @@ router.get('/admin/events/:token/publish', async (req, res) => {
     const event = await getEventByToken(token);
 
     if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
 
     if (event.guest_count < 1) {
       return res.status(400).send(
@@ -990,6 +1052,10 @@ router.get('/admin/events/:token/unpublish', async (req, res) => {
   const token = req.params.token;
 
   try {
+    const event = await getEventByToken(token);
+    if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
+
     await pool.query(
       `
       UPDATE events
@@ -1011,6 +1077,7 @@ router.get('/admin/events/:token/clear', async (req, res) => {
   try {
     const event = await getEventByToken(token);
     if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
 
     res.send(
       renderLayout(
@@ -1053,6 +1120,7 @@ router.post('/admin/events/:token/clear', async (req, res) => {
   try {
     const event = await getEventByToken(token);
     if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
 
     await pool.query('BEGIN');
     await pool.query(`DELETE FROM guests WHERE event_id = $1`, [event.id]);
@@ -1089,6 +1157,7 @@ router.get('/admin/events/:token/delete', async (req, res) => {
   try {
     const event = await getEventByToken(token);
     if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
 
     res.send(
       renderLayout(
@@ -1131,6 +1200,7 @@ router.post('/admin/events/:token/delete', async (req, res) => {
   try {
     const event = await getEventByToken(token);
     if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
 
     await pool.query('BEGIN');
     await pool.query(`DELETE FROM guests WHERE event_id = $1`, [event.id]);
