@@ -1,4 +1,6 @@
 const express = require('express');
+const QRCode = require('qrcode');
+const sharp = require('sharp');
 const { pool } = require('../db');
 const {
   escapeHtml,
@@ -10,6 +12,7 @@ const { requireAdmin, adminNav } = require('../lib/auth');
 const {
   normalizeCell,
   formatDateTime,
+  formatDate,
   detectColumnIndex,
   normalizeHexColor
 } = require('../lib/formatting');
@@ -20,14 +23,121 @@ const {
   parseWorkbookFromBuffer,
   imageBufferToDataUrl
 } = require('../lib/uploads');
+const { VENUE_OPTIONS, canAccessVenue } = require('../lib/venues');
 
 const router = express.Router();
 router.use('/admin', requireAdmin);
 
 const uploadSessions = new Map();
-
 function generateToken() {
   return Math.random().toString(36).slice(2, 10);
+}
+
+function parseEventDateInput(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return raw;
+}
+
+function parseVenueInput(value) {
+  const venue = String(value || '').trim();
+  if (!venue) return null;
+  return VENUE_OPTIONS.includes(venue) ? venue : null;
+}
+
+function renderVenueOptions(selectedVenue, availableVenues = VENUE_OPTIONS) {
+  return `
+    <option value="">Select a venue</option>
+    ${availableVenues.map(venue => `
+      <option value="${escapeHtml(venue)}" ${venue === selectedVenue ? 'selected' : ''}>
+        ${escapeHtml(venue)}
+      </option>
+    `).join('')}
+  `;
+}
+
+function getAllowedVenuesForRequest(req) {
+  if (req.session?.adminUser?.isSuperAdmin) {
+    return VENUE_OPTIONS;
+  }
+
+  if (!Array.isArray(req.session?.adminUser?.allowedVenues)) {
+    return [];
+  }
+
+  return req.session.adminUser.allowedVenues.filter(venue => VENUE_OPTIONS.includes(venue));
+}
+
+function hasVenueAccess(req, venue) {
+  if (req.session?.adminUser?.isSuperAdmin) return true;
+  return canAccessVenue(getAllowedVenuesForRequest(req), venue);
+}
+
+function isPastEvent(eventDate) {
+  if (!eventDate) return false;
+  const date = new Date(`${eventDate}T00:00:00+09:30`);
+  if (Number.isNaN(date.getTime())) return false;
+
+  const nowInAdelaide = new Date(
+    new Date().toLocaleString('en-US', { timeZone: 'Australia/Adelaide' })
+  );
+  nowInAdelaide.setHours(0, 0, 0, 0);
+
+  return date < nowInAdelaide;
+}
+
+function getPublicSearchUrl(req, token) {
+  const configuredBaseUrl = String(process.env.PUBLIC_BASE_URL || '').trim().replace(/\/+$/, '');
+  const baseUrl = configuredBaseUrl || `${req.protocol}://${req.get('host')}`;
+  return `${baseUrl}/e/${encodeURIComponent(token)}`;
+}
+
+function qrExportFileName(event) {
+  const safeName = String(event.name || 'event')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  return `${safeName || 'event'}-qr-3840x2160.png`;
+}
+
+async function buildQrExportSvg(event, publicSearchUrl) {
+  const qrSvgRaw = await QRCode.toString(publicSearchUrl, {
+    type: 'svg',
+    errorCorrectionLevel: 'H',
+    margin: 1,
+    width: 1400,
+    color: {
+      dark: event.primary_color || '#1f3c88',
+      light: '#ffffff'
+    }
+  });
+
+  const qrSvgDataUri = `data:image/svg+xml;base64,${Buffer.from(qrSvgRaw).toString('base64')}`;
+  const tertiary = escapeHtml(event.tertiary_color || '#eef3ff');
+  const primary = escapeHtml(event.primary_color || '#1f3c88');
+  const logoUrl = event.logo_url ? `<image href="${escapeHtml(event.logo_url)}" x="230" y="140" width="360" height="360" preserveAspectRatio="xMidYMid meet" />` : '';
+  const venueLine = event.venue
+    ? `<text x="230" y="690" fill="#10213f" font-size="78" font-family="Inter, Arial, sans-serif">${escapeHtml(event.venue)}</text>`
+    : '';
+
+  return `
+<svg xmlns="http://www.w3.org/2000/svg" width="3840" height="2160" viewBox="0 0 3840 2160">
+  <rect x="0" y="0" width="3840" height="2160" fill="${tertiary}" />
+  <rect x="120" y="120" rx="72" ry="72" width="3600" height="1920" fill="#ffffff" />
+  <rect x="120" y="120" rx="72" ry="72" width="3600" height="180" fill="${primary}" />
+  <text x="220" y="235" fill="#ffffff" font-size="86" font-weight="700" font-family="Inter, Arial, sans-serif">Guest Seating Lookup</text>
+  <text x="230" y="560" fill="#10213f" font-size="120" font-weight="700" font-family="Inter, Arial, sans-serif">${escapeHtml(event.name || 'Event')}</text>
+  ${venueLine}
+  <text x="230" y="820" fill="#3f4f6d" font-size="56" font-family="Inter, Arial, sans-serif">Scan to open the public search page</text>
+  <text x="230" y="905" fill="#3f4f6d" font-size="44" font-family="Inter, Arial, sans-serif">${escapeHtml(publicSearchUrl)}</text>
+  ${logoUrl}
+  <rect x="2230" y="350" width="1360" height="1360" rx="48" ry="48" fill="${tertiary}" />
+  <image href="${qrSvgDataUri}" x="2210" y="330" width="1400" height="1400" preserveAspectRatio="xMidYMid meet" />
+</svg>
+  `.trim();
 }
 
 async function getEventByToken(token) {
@@ -41,6 +151,8 @@ async function getEventByToken(token) {
       e.logo_url,
       e.primary_color,
       e.tertiary_color,
+      e.venue,
+      e.event_date,
       e.created_at,
       e.last_imported_at,
       e.last_import_file_name,
@@ -56,6 +168,8 @@ async function getEventByToken(token) {
       e.logo_url,
       e.primary_color,
       e.tertiary_color,
+      e.venue,
+      e.event_date,
       e.created_at,
       e.last_imported_at,
       e.last_import_file_name
@@ -68,39 +182,55 @@ async function getEventByToken(token) {
 
 router.get('/admin/events', async (req, res) => {
   try {
-    const result = await pool.query(
-      `
-      SELECT
-        e.id,
-        e.name,
-        e.public_token,
-        e.is_published,
-        e.logo_url,
-        e.primary_color,
-        e.tertiary_color,
-        e.created_at,
-        e.last_imported_at,
-        e.last_import_file_name,
-        COUNT(g.id)::int AS guest_count
-      FROM events e
-      LEFT JOIN guests g ON g.event_id = e.id
-      GROUP BY
-        e.id,
-        e.name,
-        e.public_token,
-        e.is_published,
-        e.logo_url,
-        e.primary_color,
-        e.tertiary_color,
-        e.created_at,
-        e.last_imported_at,
-        e.last_import_file_name
-      ORDER BY e.id DESC
-      `
-    );
+    const allowedVenues = getAllowedVenuesForRequest(req);
+    let result = { rows: [] };
+
+    if (req.session.adminUser.isSuperAdmin || allowedVenues.length > 0) {
+      const venueCondition = req.session.adminUser.isSuperAdmin ? '' : 'AND e.venue = ANY($1::TEXT[])';
+      const params = req.session.adminUser.isSuperAdmin ? [] : [allowedVenues];
+
+      result = await pool.query(
+        `
+        SELECT
+          e.id,
+          e.name,
+          e.public_token,
+          e.is_published,
+          e.logo_url,
+          e.primary_color,
+          e.tertiary_color,
+          e.venue,
+          e.event_date,
+          e.created_at,
+          e.last_imported_at,
+          e.last_import_file_name,
+          COUNT(g.id)::int AS guest_count
+        FROM events e
+        LEFT JOIN guests g ON g.event_id = e.id
+        WHERE (e.event_date IS NULL
+          OR e.event_date >= ((NOW() AT TIME ZONE 'Australia/Adelaide')::DATE - 2))
+          ${venueCondition}
+        GROUP BY
+          e.id,
+          e.name,
+          e.public_token,
+          e.is_published,
+          e.logo_url,
+          e.primary_color,
+          e.tertiary_color,
+          e.venue,
+          e.event_date,
+          e.created_at,
+          e.last_imported_at,
+          e.last_import_file_name
+        ORDER BY e.id DESC
+        `,
+        params
+      );
+    }
 
     const body = `
-      ${adminNav([{ href: '/', label: 'Home' }])}
+      ${adminNav(req, [{ href: '/', label: 'Home' }])}
 
       <div class="hero">
         <div>
@@ -108,15 +238,20 @@ router.get('/admin/events', async (req, res) => {
           <p>Signed in as <strong>${escapeHtml(req.session.adminUser.username)}</strong>.</p>
         </div>
         <div class="actions" style="margin-top: 0;">
-          <a class="button" href="/admin/events/new">Create Event</a>
+          ${req.session.adminUser.isSuperAdmin || getAllowedVenuesForRequest(req).length
+            ? '<a class="button" href="/admin/events/new">Create Event</a>'
+            : '<span class="muted small">No venue access assigned</span>'}
         </div>
       </div>
 
       ${
         result.rows.length
           ? `<div class="grid cards">
-              ${result.rows.map(e => `
-                <div class="card">
+              ${result.rows.map(e => {
+                const pastEvent = isPastEvent(e.event_date);
+
+                return `
+                <div class="card ${pastEvent ? 'past-event' : ''}">
                   <div class="event-card-header">
                     <div>
                       <h2 class="event-card-title">${escapeHtml(e.name || 'Untitled Event')}</h2>
@@ -128,6 +263,7 @@ router.get('/admin/events', async (req, res) => {
                       <span class="badge ${e.is_published ? 'published' : 'draft'}">
                         ${e.is_published ? 'Published' : 'Draft'}
                       </span>
+                      ${pastEvent ? '<span class="badge past-ready">Past · Ready to delete</span>' : ''}
                     </div>
                   </div>
 
@@ -149,6 +285,8 @@ router.get('/admin/events', async (req, res) => {
                   </div>
 
                   <div class="event-meta">
+                    <div>Venue: ${escapeHtml(e.venue || 'Not set')}</div>
+                    <div>Event Date: ${escapeHtml(formatDate(e.event_date))}</div>
                     <div>Public URL: <a href="/e/${encodeURIComponent(e.public_token || '')}">/e/${escapeHtml(e.public_token || '')}</a></div>
                     <div>Updated: ${escapeHtml(formatDateTime(e.last_imported_at))}</div>
                     <div>Theme: ${escapeHtml(e.primary_color || '#1f3c88')} / ${escapeHtml(e.tertiary_color || '#eef3ff')}</div>
@@ -166,7 +304,8 @@ router.get('/admin/events', async (req, res) => {
                     <a class="button danger" href="/admin/events/${encodeURIComponent(e.public_token || '')}/delete">Delete</a>
                   </div>
                 </div>
-              `).join('')}
+              `;
+              }).join('')}
             </div>`
           : `
             <div class="empty-state">
@@ -189,11 +328,16 @@ router.get('/admin/events', async (req, res) => {
 });
 
 router.get('/admin/events/new', (req, res) => {
+  const availableVenues = getAllowedVenuesForRequest(req);
+  if (!req.session.adminUser.isSuperAdmin && availableVenues.length === 0) {
+    return res.status(403).send('No venue access is assigned to your user yet.');
+  }
+
   res.send(
     renderLayout(
       'Create Event',
       `
-        ${adminNav([{ href: '/admin/events', label: 'Back to Events' }])}
+        ${adminNav(req, [{ href: '/admin/events', label: 'Back to Events' }])}
 
         <div class="panel" style="max-width: 720px; margin: 0 auto;">
           <h1 style="margin-top: 0;">Create Event</h1>
@@ -205,6 +349,18 @@ router.get('/admin/events/new', (req, res) => {
             </div>
 
             <div class="field-row">
+              <div class="field">
+                <label for="venue">Venue</label>
+                <select id="venue" name="venue">
+                  ${renderVenueOptions(null, availableVenues)}
+                </select>
+              </div>
+
+              <div class="field">
+                <label for="event_date">Event Date</label>
+                <input id="event_date" name="event_date" type="date" />
+              </div>
+
               <div class="field">
                 <label for="primary_color">Primary Colour</label>
                 <input id="primary_color" name="primary_color" type="color" value="#1f3c88" />
@@ -229,11 +385,19 @@ router.get('/admin/events/new', (req, res) => {
 
 router.post('/admin/events/new', async (req, res) => {
   const name = (req.body.name || '').trim();
+  const venue = parseVenueInput(req.body.venue);
+  const eventDate = parseEventDateInput(req.body.event_date);
   const primaryColor = normalizeHexColor(req.body.primary_color, '#1f3c88');
   const tertiaryColor = normalizeHexColor(req.body.tertiary_color, '#eef3ff');
 
   if (!name) {
     return res.status(400).send('Event name is required');
+  }
+  if (!venue) {
+    return res.status(400).send('Please select a venue.');
+  }
+  if (!hasVenueAccess(req, venue)) {
+    return res.status(403).send('You do not have access to that venue.');
   }
 
   try {
@@ -251,10 +415,10 @@ router.post('/admin/events/new', async (req, res) => {
 
     await pool.query(
       `
-      INSERT INTO events (name, public_token, is_published, primary_color, tertiary_color)
-      VALUES ($1, $2, false, $3, $4)
+      INSERT INTO events (name, public_token, is_published, primary_color, tertiary_color, venue, event_date)
+      VALUES ($1, $2, false, $3, $4, $5, $6)
       `,
-      [name, token, primaryColor, tertiaryColor]
+      [name, token, primaryColor, tertiaryColor, venue, eventDate]
     );
 
     res.redirect(`/admin/events/${encodeURIComponent(token)}`);
@@ -274,6 +438,9 @@ router.get('/admin/events/:token', async (req, res) => {
         renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`)
       );
     }
+    if (!hasVenueAccess(req, event.venue)) {
+      return res.status(403).send('You do not have access to this event venue.');
+    }
 
     const recentGuestsResult = await pool.query(
       `
@@ -286,8 +453,11 @@ router.get('/admin/events/:token', async (req, res) => {
       [event.id]
     );
 
+    const publicSearchUrl = getPublicSearchUrl(req, event.public_token);
+    const publicSearchQrCode = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(publicSearchUrl)}`;
+
     const body = `
-      ${adminNav([
+      ${adminNav(req, [
         { href: '/admin/events', label: 'Back to Events' },
         { href: `/e/${event.public_token}`, label: 'Open Public Search' }
       ])}
@@ -317,6 +487,14 @@ router.get('/admin/events/:token', async (req, res) => {
               <div class="stat">
                 <div class="stat-label">Public Token</div>
                 <div class="small"><span class="code-line">${escapeHtml(event.public_token)}</span></div>
+              </div>
+              <div class="stat">
+                <div class="stat-label">Venue</div>
+                <div class="small">${escapeHtml(event.venue || 'Not set')}</div>
+              </div>
+              <div class="stat">
+                <div class="stat-label">Event Date</div>
+                <div class="small">${escapeHtml(formatDate(event.event_date))}</div>
               </div>
               <div class="stat">
                 <div class="stat-label">Last Import</div>
@@ -393,6 +571,23 @@ router.get('/admin/events/:token', async (req, res) => {
             <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/branding">
               <div class="field-row">
                 <div class="field">
+                  <label for="venue">Venue</label>
+                  <select id="venue" name="venue">
+                    ${renderVenueOptions(event.venue, getAllowedVenuesForRequest(req))}
+                  </select>
+                </div>
+
+                <div class="field">
+                  <label for="event_date">Event Date</label>
+                  <input
+                    id="event_date"
+                    name="event_date"
+                    type="date"
+                    value="${event.event_date ? escapeHtml(String(event.event_date).slice(0, 10)) : ''}"
+                  />
+                </div>
+
+                <div class="field">
                   <label for="primary_color">Primary Colour</label>
                   <input
                     id="primary_color"
@@ -445,6 +640,24 @@ router.get('/admin/events/:token', async (req, res) => {
             </div>
           </div>
 
+          <div class="panel">
+            <h2>Public Search QR Code</h2>
+            <p class="muted">Scan this code to open the public search page for this event.</p>
+            <div class="qr-panel">
+              <img
+                class="qr-image"
+                src="${publicSearchQrCode}"
+                alt="QR code for ${escapeHtml(event.name)} public search page"
+              />
+            </div>
+            <div class="small" style="margin-top: 10px;">
+              URL: <a href="${escapeHtml(publicSearchUrl)}">${escapeHtml(publicSearchUrl)}</a>
+            </div>
+            <div class="actions">
+              <a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/qr-export.png">Export 3840×2160 QR PNG</a>
+            </div>
+          </div>
+
           <div class="danger-zone">
             <h3 style="margin-top: 0;">Danger Zone</h3>
             <div class="actions">
@@ -470,17 +683,26 @@ router.post('/admin/events/:token/branding', async (req, res) => {
   try {
     const event = await getEventByToken(token);
     if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) {
+      return res.status(403).send('You do not have access to this event venue.');
+    }
 
     const primaryColor = normalizeHexColor(req.body.primary_color, '#1f3c88');
     const tertiaryColor = normalizeHexColor(req.body.tertiary_color, '#eef3ff');
+    const venue = parseVenueInput(req.body.venue);
+    const eventDate = parseEventDateInput(req.body.event_date);
+    if (!venue) return res.status(400).send('Please select a venue.');
+    if (!hasVenueAccess(req, venue)) {
+      return res.status(403).send('You do not have access to that venue.');
+    }
 
     await pool.query(
       `
       UPDATE events
-      SET primary_color = $2, tertiary_color = $3
+      SET primary_color = $2, tertiary_color = $3, venue = $4, event_date = $5
       WHERE public_token = $1
       `,
-      [token, primaryColor, tertiaryColor]
+      [token, primaryColor, tertiaryColor, venue, eventDate]
     );
 
     res.redirect(`/admin/events/${encodeURIComponent(token)}`);
@@ -495,6 +717,7 @@ router.post('/admin/events/:token/logo', logoUpload.single('logoFile'), async (r
   try {
     const event = await getEventByToken(token);
     if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
     if (!req.file) return res.status(400).send('No logo file uploaded');
 
     const dataUrl = imageBufferToDataUrl(req.file);
@@ -518,6 +741,10 @@ router.get('/admin/events/:token/logo/remove', async (req, res) => {
   const token = req.params.token;
 
   try {
+    const event = await getEventByToken(token);
+    if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
+
     await pool.query(
       `
       UPDATE events
@@ -543,9 +770,12 @@ router.get('/admin/events/:token/upload', async (req, res) => {
         renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`)
       );
     }
+    if (!hasVenueAccess(req, event.venue)) {
+      return res.status(403).send('You do not have access to this event venue.');
+    }
 
     const body = `
-      ${adminNav([
+      ${adminNav(req, [
         { href: `/admin/events/${event.public_token}`, label: 'Back to Event' },
         { href: '/admin/events', label: 'All Events' }
       ])}
@@ -596,6 +826,7 @@ router.post('/admin/events/:token/upload', guestUpload.single('guestFile'), asyn
   try {
     const event = await getEventByToken(token);
     if (!event) return res.status(404).send('Invalid event');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
     if (!req.file) return res.status(400).send('No file uploaded');
 
     const parsed = parseWorkbookFromBuffer(req.file.buffer, req.file.originalname);
@@ -610,6 +841,7 @@ router.post('/admin/events/:token/upload', guestUpload.single('guestFile'), asyn
       eventId: event.id,
       eventName: event.name,
       eventToken: event.public_token,
+      venue: event.venue,
       originalName: parsed.originalName,
       sheetName: parsed.firstSheetName,
       headers: parsed.headers,
@@ -637,9 +869,12 @@ router.get('/admin/uploads/:uploadToken/map', (req, res) => {
   if (!sessionState) {
     return res.status(404).send('Upload session not found. Upload the file again.');
   }
+  if (!hasVenueAccess(req, sessionState.venue)) {
+    return res.status(403).send('You do not have access to this upload.');
+  }
 
   const body = `
-    ${adminNav([
+    ${adminNav(req, [
       { href: `/admin/events/${sessionState.eventToken}/upload`, label: 'Back to Upload' },
       { href: `/admin/events/${sessionState.eventToken}`, label: 'Event Details' }
     ])}
@@ -713,6 +948,9 @@ router.post('/admin/uploads/:uploadToken/import', async (req, res) => {
 
   if (!sessionState) {
     return res.status(404).send('Upload session not found. Upload the file again.');
+  }
+  if (!hasVenueAccess(req, sessionState.venue)) {
+    return res.status(403).send('You do not have access to this upload.');
   }
 
   const fullNameIndex = req.body.full_name;
@@ -827,6 +1065,7 @@ router.get('/admin/events/:token/publish', async (req, res) => {
     const event = await getEventByToken(token);
 
     if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
 
     if (event.guest_count < 1) {
       return res.status(400).send(
@@ -860,10 +1099,34 @@ router.get('/admin/events/:token/publish', async (req, res) => {
   }
 });
 
+router.get('/admin/events/:token/qr-export.png', async (req, res) => {
+  const token = req.params.token;
+
+  try {
+    const event = await getEventByToken(token);
+    if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
+
+    const publicSearchUrl = getPublicSearchUrl(req, event.public_token);
+    const svg = await buildQrExportSvg(event, publicSearchUrl);
+    const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
+
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Disposition', `attachment; filename="${qrExportFileName(event)}"`);
+    return res.send(pngBuffer);
+  } catch (err) {
+    return res.status(500).send(escapeHtml(err.message));
+  }
+});
+
 router.get('/admin/events/:token/unpublish', async (req, res) => {
   const token = req.params.token;
 
   try {
+    const event = await getEventByToken(token);
+    if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
+
     await pool.query(
       `
       UPDATE events
@@ -885,6 +1148,7 @@ router.get('/admin/events/:token/clear', async (req, res) => {
   try {
     const event = await getEventByToken(token);
     if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
 
     res.send(
       renderLayout(
@@ -927,6 +1191,7 @@ router.post('/admin/events/:token/clear', async (req, res) => {
   try {
     const event = await getEventByToken(token);
     if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
 
     await pool.query('BEGIN');
     await pool.query(`DELETE FROM guests WHERE event_id = $1`, [event.id]);
@@ -963,6 +1228,7 @@ router.get('/admin/events/:token/delete', async (req, res) => {
   try {
     const event = await getEventByToken(token);
     if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
 
     res.send(
       renderLayout(
@@ -1005,6 +1271,7 @@ router.post('/admin/events/:token/delete', async (req, res) => {
   try {
     const event = await getEventByToken(token);
     if (!event) return res.status(404).send('Event not found');
+    if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
 
     await pool.query('BEGIN');
     await pool.query(`DELETE FROM guests WHERE event_id = $1`, [event.id]);

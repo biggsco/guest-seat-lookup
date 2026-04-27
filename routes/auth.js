@@ -2,13 +2,14 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const { pool } = require('../db');
 const { escapeHtml, renderLayout } = require('../render');
+const { requireAdmin, adminNav } = require('../lib/auth');
 
 const router = express.Router();
 
 async function getAdminByUsername(username) {
   const result = await pool.query(
     `
-    SELECT id, username, password_hash
+    SELECT id, username, password_hash, is_super_admin, allowed_venues
     FROM admins
     WHERE username = $1
     `,
@@ -105,7 +106,9 @@ router.post('/admin/login', async (req, res) => {
 
     req.session.adminUser = {
       id: admin.id,
-      username: admin.username
+      username: admin.username,
+      isSuperAdmin: Boolean(admin.is_super_admin),
+      allowedVenues: Array.isArray(admin.allowed_venues) ? admin.allowed_venues : []
     };
 
     return res.redirect(safeNext);
@@ -132,6 +135,83 @@ router.get('/admin/logout', (req, res) => {
 
 router.get('/admin', (req, res) => {
   res.redirect('/admin/events');
+});
+
+router.get('/admin/account/password', requireAdmin, (req, res) => {
+  res.send(
+    renderLayout(
+      'Update Password',
+      `
+        ${adminNav(req, [{ href: '/admin/events', label: 'Back to Events' }])}
+        <div class="panel" style="max-width: 620px; margin: 0 auto;">
+          <h1 style="margin-top: 0;">Update Password</h1>
+          <p class="muted">Signed in as <strong>${escapeHtml(req.session.adminUser.username)}</strong>.</p>
+
+          <form method="POST" action="/admin/account/password">
+            <div class="field">
+              <label for="current_password">Current Password</label>
+              <input id="current_password" type="password" name="current_password" required />
+            </div>
+            <div class="field">
+              <label for="new_password">New Password</label>
+              <input id="new_password" type="password" name="new_password" required />
+            </div>
+            <div class="actions">
+              <button type="submit">Update Password</button>
+              <a class="button secondary" href="/admin/events">Cancel</a>
+            </div>
+          </form>
+        </div>
+      `
+    )
+  );
+});
+
+router.post('/admin/account/password', requireAdmin, async (req, res) => {
+  const currentPassword = String(req.body.current_password || '');
+  const newPassword = String(req.body.new_password || '');
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).send('Current and new password are required.');
+  }
+
+  if (newPassword.length < 8) {
+    return res.status(400).send('New password must be at least 8 characters.');
+  }
+
+  try {
+    const result = await pool.query(
+      `
+      SELECT id, password_hash
+      FROM admins
+      WHERE id = $1
+      `,
+      [req.session.adminUser.id]
+    );
+
+    if (!result.rows[0]) {
+      return res.status(404).send('Admin account not found.');
+    }
+
+    const valid = await bcrypt.compare(currentPassword, result.rows[0].password_hash);
+    if (!valid) {
+      return res.status(401).send('Current password is incorrect.');
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await pool.query(
+      `
+      UPDATE admins
+      SET password_hash = $2
+      WHERE id = $1
+      `,
+      [req.session.adminUser.id, passwordHash]
+    );
+
+    return res.redirect('/admin/events');
+  } catch (err) {
+    return res.status(500).send(escapeHtml(err.message));
+  }
 });
 
 module.exports = router;
