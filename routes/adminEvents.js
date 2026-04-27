@@ -133,7 +133,6 @@ async function buildQrExportSvg(event, publicSearchUrl) {
   <text x="220" y="520" fill="#10213f" font-size="122" font-weight="700" font-family="Inter, Arial, sans-serif">${escapeHtml(event.name || 'Event')}</text>
   ${venueLine}
   <text x="220" y="840" fill="#3f4f6d" font-size="58" font-family="Inter, Arial, sans-serif">Scan to open guest search</text>
-  <rect x="220" y="1760" width="560" height="10" fill="${primary}" rx="5" ry="5" />
   ${logoUrl}
   <rect x="2110" y="310" width="1460" height="1460" rx="64" ry="64" fill="${tertiary}" />
   <image href="${qrSvgDataUri}" x="2140" y="340" width="1400" height="1400" preserveAspectRatio="xMidYMid meet" />
