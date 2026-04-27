@@ -118,24 +118,25 @@ async function buildQrExportSvg(event, publicSearchUrl) {
   const qrSvgDataUri = `data:image/svg+xml;base64,${Buffer.from(qrSvgRaw).toString('base64')}`;
   const tertiary = escapeHtml(event.tertiary_color || '#eef3ff');
   const primary = escapeHtml(event.primary_color || '#1f3c88');
-  const logoUrl = event.logo_url ? `<image href="${escapeHtml(event.logo_url)}" x="230" y="140" width="360" height="360" preserveAspectRatio="xMidYMid meet" />` : '';
+  const logoUrl = event.logo_url
+    ? `<image href="${escapeHtml(event.logo_url)}" x="220" y="1740" width="220" height="220" preserveAspectRatio="xMidYMid meet" />`
+    : '';
   const venueLine = event.venue
-    ? `<text x="230" y="690" fill="#10213f" font-size="78" font-family="Inter, Arial, sans-serif">${escapeHtml(event.venue)}</text>`
+    ? `<text x="220" y="690" fill="#274069" font-size="74" font-family="Inter, Arial, sans-serif">${escapeHtml(event.venue)}</text>`
     : '';
 
   return `
 <svg xmlns="http://www.w3.org/2000/svg" width="3840" height="2160" viewBox="0 0 3840 2160">
   <rect x="0" y="0" width="3840" height="2160" fill="${tertiary}" />
-  <rect x="120" y="120" rx="72" ry="72" width="3600" height="1920" fill="#ffffff" />
-  <rect x="120" y="120" rx="72" ry="72" width="3600" height="180" fill="${primary}" />
-  <text x="220" y="235" fill="#ffffff" font-size="86" font-weight="700" font-family="Inter, Arial, sans-serif">Guest Seating Lookup</text>
-  <text x="230" y="560" fill="#10213f" font-size="120" font-weight="700" font-family="Inter, Arial, sans-serif">${escapeHtml(event.name || 'Event')}</text>
+  <rect x="100" y="100" rx="72" ry="72" width="3640" height="1960" fill="#ffffff" />
+  <rect x="100" y="100" rx="72" ry="72" width="3640" height="24" fill="${primary}" />
+  <text x="220" y="520" fill="#10213f" font-size="122" font-weight="700" font-family="Inter, Arial, sans-serif">${escapeHtml(event.name || 'Event')}</text>
   ${venueLine}
-  <text x="230" y="820" fill="#3f4f6d" font-size="56" font-family="Inter, Arial, sans-serif">Scan to open the public search page</text>
-  <text x="230" y="905" fill="#3f4f6d" font-size="44" font-family="Inter, Arial, sans-serif">${escapeHtml(publicSearchUrl)}</text>
+  <text x="220" y="840" fill="#3f4f6d" font-size="58" font-family="Inter, Arial, sans-serif">Scan to open guest search</text>
+  <rect x="220" y="1760" width="560" height="10" fill="${primary}" rx="5" ry="5" />
   ${logoUrl}
-  <rect x="2230" y="350" width="1360" height="1360" rx="48" ry="48" fill="${tertiary}" />
-  <image href="${qrSvgDataUri}" x="2210" y="330" width="1400" height="1400" preserveAspectRatio="xMidYMid meet" />
+  <rect x="2110" y="310" width="1460" height="1460" rx="64" ry="64" fill="${tertiary}" />
+  <image href="${qrSvgDataUri}" x="2140" y="340" width="1400" height="1400" preserveAspectRatio="xMidYMid meet" />
 </svg>
   `.trim();
 }
@@ -649,9 +650,6 @@ router.get('/admin/events/:token', async (req, res) => {
                 src="${publicSearchQrCode}"
                 alt="QR code for ${escapeHtml(event.name)} public search page"
               />
-            </div>
-            <div class="small" style="margin-top: 10px;">
-              URL: <a href="${escapeHtml(publicSearchUrl)}">${escapeHtml(publicSearchUrl)}</a>
             </div>
             <div class="actions">
               <a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/qr-export.png">Export 3840×2160 QR PNG</a>
