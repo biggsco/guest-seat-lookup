@@ -137,6 +137,7 @@ function renderSearchPage(event, q, results) {
           ${logoHtml}
           <div class="muted small" style="margin-bottom: 8px;">Guest seating lookup</div>
           <h1>${escapeHtml(event.name)}</h1>
+          ${event.venue ? `<p class="muted" style="margin: 0 0 8px;"><strong>Venue:</strong> ${escapeHtml(event.venue)}</p>` : ''}
           <p class="muted" style="margin: 0 0 8px;">
             Search your name or company to find your assigned table.
           </p>
