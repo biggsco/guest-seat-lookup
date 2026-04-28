@@ -287,14 +287,25 @@ router.get('/admin/events', async (req, res) => {
                   <div class="event-meta">
                     <div>Venue: ${escapeHtml(e.venue || 'Not set')}</div>
                     <div>Event Date: ${escapeHtml(formatDate(e.event_date))}</div>
-                    <div>Public URL: <a href="/e/${encodeURIComponent(e.public_token || '')}">/e/${escapeHtml(e.public_token || '')}</a></div>
+                    <div>
+                      Public URL:
+                      ${
+                        e.is_published
+                          ? `<a href="/e/${encodeURIComponent(e.public_token || '')}">/e/${escapeHtml(e.public_token || '')}</a>`
+                          : '<span class="muted">Available after publishing</span>'
+                      }
+                    </div>
                     <div>Updated: ${escapeHtml(formatDateTime(e.last_imported_at))}</div>
                     <div>Theme: ${escapeHtml(e.primary_color || '#1f3c88')} / ${escapeHtml(e.tertiary_color || '#eef3ff')}</div>
                   </div>
 
                   <div class="actions">
                     <a class="button secondary" href="/admin/events/${encodeURIComponent(e.public_token || '')}">Manage</a>
-                    <a class="button secondary" href="/e/${encodeURIComponent(e.public_token || '')}">View Search</a>
+                    ${
+                      e.is_published
+                        ? `<a class="button secondary" href="/e/${encodeURIComponent(e.public_token || '')}">View Search</a>`
+                        : ''
+                    }
                     <a class="button secondary" href="/admin/events/${encodeURIComponent(e.public_token || '')}/upload">Upload File</a>
                     ${
                       e.is_published
@@ -459,7 +470,7 @@ router.get('/admin/events/:token', async (req, res) => {
     const body = `
       ${adminNav(req, [
         { href: '/admin/events', label: 'Back to Events' },
-        { href: `/e/${event.public_token}`, label: 'Open Public Search' }
+        ...(event.is_published ? [{ href: `/e/${event.public_token}`, label: 'Open Public Search' }] : [])
       ])}
 
       <div class="hero">
@@ -504,7 +515,14 @@ router.get('/admin/events/:token', async (req, res) => {
 
             <div class="event-meta" style="margin-top: 18px;">
               <div>Last Import File: ${escapeHtml(event.last_import_file_name || 'None')}</div>
-              <div>Public URL: <a href="/e/${encodeURIComponent(event.public_token)}">/e/${escapeHtml(event.public_token)}</a></div>
+              <div>
+                Public URL:
+                ${
+                  event.is_published
+                    ? `<a href="/e/${encodeURIComponent(event.public_token)}">/e/${escapeHtml(event.public_token)}</a>`
+                    : '<span class="muted">Available after publishing</span>'
+                }
+              </div>
               <div>Primary Colour: ${escapeHtml(event.primary_color || '#1f3c88')}</div>
               <div>Tertiary Colour: ${escapeHtml(event.tertiary_color || '#eef3ff')}</div>
             </div>
@@ -635,24 +653,34 @@ router.get('/admin/events/:token', async (req, res) => {
           <div class="panel">
             <h2>Actions</h2>
             <div class="actions">
-              <a class="button secondary" href="/e/${encodeURIComponent(event.public_token)}">View Search</a>
+              ${
+                event.is_published
+                  ? `<a class="button secondary" href="/e/${encodeURIComponent(event.public_token)}">View Search</a>`
+                  : ''
+              }
               <a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/upload">Upload File</a>
             </div>
           </div>
 
           <div class="panel">
             <h2>Public Search QR Code</h2>
-            <p class="muted">Scan this code to open the public search page for this event.</p>
-            <div class="qr-panel">
-              <img
-                class="qr-image"
-                src="${publicSearchQrCode}"
-                alt="QR code for ${escapeHtml(event.name)} public search page"
-              />
-            </div>
-            <div class="actions">
-              <a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/qr-export.png">Export 3840×2160 QR PNG</a>
-            </div>
+            ${
+              event.is_published
+                ? `
+                  <p class="muted">Scan this code to open the public search page for this event.</p>
+                  <div class="qr-panel">
+                    <img
+                      class="qr-image"
+                      src="${publicSearchQrCode}"
+                      alt="QR code for ${escapeHtml(event.name)} public search page"
+                    />
+                  </div>
+                  <div class="actions">
+                    <a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/qr-export.png">Export 3840×2160 QR PNG</a>
+                  </div>
+                `
+                : '<p class="muted">Publish this event to enable public search links and QR codes.</p>'
+            }
           </div>
 
           <div class="danger-zone">

@@ -18,16 +18,6 @@ router.get('/', (req, res) => {
             </p>
           </div>
         </div>
-
-        <div class="grid cards">
-          <div class="card">
-            <h2>System Status</h2>
-            <p class="muted">Check database connectivity and basic app health.</p>
-            <div class="actions">
-              <a class="button secondary" href="/health">Health Check</a>
-            </div>
-          </div>
-        </div>
       `
     )
   );
@@ -80,7 +70,7 @@ router.get('/e/:token', async (req, res) => {
     if (eventResult.rows.length === 0) {
       return res.send(
         renderLayout(
-          'Event Not Available',
+          'Event Not Found',
           `
             <div class="search-shell">
               <div class="search-card">
