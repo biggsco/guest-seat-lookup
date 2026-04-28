@@ -264,6 +264,26 @@ button.danger {
   gap: 12px;
 }
 
+.file-dropzone {
+  border: 2px dashed #b7c8e8;
+  border-radius: 12px;
+  background: #f8fbff;
+  padding: 22px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.file-dropzone:hover,
+.file-dropzone.dragging {
+  border-color: var(--brand);
+  background: #eef4ff;
+}
+
+.file-dropzone input[type='file'] {
+  display: none;
+}
+
 .muted {
   color: var(--muted);
 }
