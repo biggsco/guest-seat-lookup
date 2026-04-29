@@ -1,6 +1,5 @@
 const express = require('express');
 const QRCode = require('qrcode');
-const sharp = require('sharp');
 const { pool } = require('../db');
 const {
   escapeHtml,
@@ -680,7 +679,7 @@ router.get('/admin/events/:token', async (req, res) => {
                     />
                   </div>
                   <div class="actions">
-                    <a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/qr-export.png">Export 3840×2160 QR PNG</a>
+                    <a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/qr-export.svg">Export 3840×2160 QR SVG</a>
                   </div>
                 `
                 : '<p class="muted">Publish this event to enable public search links and QR codes.</p>'
@@ -1183,7 +1182,7 @@ router.get('/admin/events/:token/publish', async (req, res) => {
   }
 });
 
-router.get('/admin/events/:token/qr-export.png', async (req, res) => {
+router.get('/admin/events/:token/qr-export.svg', async (req, res) => {
   const token = req.params.token;
 
   try {
@@ -1193,11 +1192,9 @@ router.get('/admin/events/:token/qr-export.png', async (req, res) => {
 
     const publicSearchUrl = getPublicSearchUrl(req, event.public_token);
     const svg = await buildQrExportSvg(event, publicSearchUrl);
-    const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
-
-    res.setHeader('Content-Type', 'image/png');
-    res.setHeader('Content-Disposition', `attachment; filename="${qrExportFileName(event)}"`);
-    return res.send(pngBuffer);
+    res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${qrExportFileName(event).replace(/\.png$/i, '.svg')}"`);
+    return res.send(svg);
   } catch (err) {
     return res.status(500).send(escapeHtml(err.message));
   }
