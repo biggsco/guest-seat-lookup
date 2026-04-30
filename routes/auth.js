@@ -6,6 +6,36 @@ const { requireAdmin, adminNav } = require('../lib/auth');
 
 const router = express.Router();
 
+const ENTRA_TENANT_ID = String(process.env.ENTRA_TENANT_ID || 'common').trim();
+const ENTRA_CLIENT_ID = String(process.env.ENTRA_CLIENT_ID || '').trim();
+const ENTRA_CLIENT_SECRET = String(process.env.ENTRA_CLIENT_SECRET || '').trim();
+const ENTRA_REDIRECT_URI = String(process.env.ENTRA_REDIRECT_URI || '').trim();
+const ENTRA_SCOPES = String(process.env.ENTRA_SCOPES || 'openid profile email').trim();
+
+function isEntraEnabled() {
+  return Boolean(ENTRA_CLIENT_ID && ENTRA_CLIENT_SECRET && ENTRA_REDIRECT_URI);
+}
+
+function entraAuthorizeUrl(state) {
+  const params = new URLSearchParams({
+    client_id: ENTRA_CLIENT_ID,
+    response_type: 'code',
+    redirect_uri: ENTRA_REDIRECT_URI,
+    response_mode: 'query',
+    scope: ENTRA_SCOPES,
+    state
+  });
+  return `https://login.microsoftonline.com/${encodeURIComponent(ENTRA_TENANT_ID)}/oauth2/v2.0/authorize?${params.toString()}`;
+}
+
+function decodeJwtPayload(token) {
+  const segments = String(token || '').split('.');
+  if (segments.length < 2) return null;
+  const b64 = segments[1].replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64.padEnd(Math.ceil(b64.length / 4) * 4, '=');
+  return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+}
+
 async function getAdminByUsername(username) {
   const result = await pool.query(
     `
@@ -20,6 +50,14 @@ async function getAdminByUsername(username) {
 }
 
 function renderLoginPage({ next = '/admin/events', username = '', error = '' } = {}) {
+  const ssoButton = isEntraEnabled()
+    ? `
+      <div class="field" style="margin-top: 16px;">
+        <a class="button secondary" href="/admin/login/entra?next=${encodeURIComponent(next)}">Sign in with Microsoft</a>
+      </div>
+    `
+    : '';
+
   return renderLayout(
     'Admin Login',
     `
@@ -47,10 +85,84 @@ function renderLoginPage({ next = '/admin/events', username = '', error = '' } =
             <a class="button secondary" href="/">Home</a>
           </div>
         </form>
+        ${ssoButton}
       </div>
     `
   );
 }
+
+router.get('/admin/login/entra', (req, res) => {
+  if (!isEntraEnabled()) {
+    return res.status(404).send('Microsoft SSO is not configured.');
+  }
+
+  const next = (req.query.next || '/admin/events').toString();
+  const safeNext = next.startsWith('/admin') ? next : '/admin/events';
+  const state = `${Math.random().toString(36).slice(2, 12)}.${Buffer.from(safeNext).toString('base64url')}`;
+  req.session.entraLoginState = state;
+  return res.redirect(entraAuthorizeUrl(state));
+});
+
+router.get('/admin/auth/entra/callback', async (req, res) => {
+  if (!isEntraEnabled()) {
+    return res.status(404).send('Microsoft SSO is not configured.');
+  }
+
+  const code = String(req.query.code || '');
+  const state = String(req.query.state || '');
+  const expectedState = String(req.session?.entraLoginState || '');
+  delete req.session.entraLoginState;
+
+  if (!code || !state || !expectedState || state !== expectedState) {
+    return res.status(400).send('Invalid SSO response state.');
+  }
+
+  try {
+    const tokenRes = await fetch(
+      `https://login.microsoftonline.com/${encodeURIComponent(ENTRA_TENANT_ID)}/oauth2/v2.0/token`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: ENTRA_CLIENT_ID,
+          client_secret: ENTRA_CLIENT_SECRET,
+          grant_type: 'authorization_code',
+          code,
+          redirect_uri: ENTRA_REDIRECT_URI,
+          scope: ENTRA_SCOPES
+        })
+      }
+    );
+
+    if (!tokenRes.ok) {
+      return res.status(401).send('Unable to complete Microsoft sign-in.');
+    }
+
+    const tokenBody = await tokenRes.json();
+    const claims = decodeJwtPayload(tokenBody.id_token || '');
+    const principal = String(claims?.preferred_username || claims?.email || claims?.upn || '').trim().toLowerCase();
+    if (!principal) return res.status(401).send('Microsoft sign-in did not include an email/UPN.');
+
+    const admin = await getAdminByUsername(principal);
+    if (!admin) {
+      return res.status(403).send('Your Microsoft account is not authorized for admin access.');
+    }
+
+    req.session.adminUser = {
+      id: admin.id,
+      username: admin.username,
+      isSuperAdmin: Boolean(admin.is_super_admin),
+      allowedVenues: Array.isArray(admin.allowed_venues) ? admin.allowed_venues : []
+    };
+
+    const encodedNext = state.includes('.') ? state.split('.').slice(1).join('.') : '';
+    const next = encodedNext ? Buffer.from(encodedNext, 'base64url').toString('utf8') : '/admin/events';
+    const safeNext = next.startsWith('/admin') ? next : '/admin/events';
+    return res.redirect(safeNext);
+  } catch (err) {
+    return res.status(500).send(escapeHtml(err.message));
+  }
+});
 
 router.get('/admin/login', (req, res) => {
   const next = (req.query.next || '/admin/events').toString();
