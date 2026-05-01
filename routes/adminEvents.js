@@ -1,6 +1,6 @@
 const express = require('express');
 const QRCode = require('qrcode');
-const sharp = require('sharp');
+const { PNG } = require('pngjs');
 const { pool } = require('../db');
 const {
   escapeHtml,
@@ -103,41 +103,15 @@ function qrExportFileName(event) {
   return `${safeName || 'event'}-qr-3840x2160.png`;
 }
 
-async function buildQrExportSvg(event, publicSearchUrl) {
-  const qrSvgRaw = await QRCode.toString(publicSearchUrl, {
-    type: 'svg',
-    errorCorrectionLevel: 'H',
-    margin: 1,
-    width: 1400,
-    color: {
-      dark: event.primary_color || '#1f3c88',
-      light: '#ffffff'
-    }
-  });
 
-  const qrSvgDataUri = `data:image/svg+xml;base64,${Buffer.from(qrSvgRaw).toString('base64')}`;
-  const tertiary = escapeHtml(event.tertiary_color || '#eef3ff');
-  const primary = escapeHtml(event.primary_color || '#1f3c88');
-  const logoUrl = event.logo_url
-    ? `<image href="${escapeHtml(event.logo_url)}" x="220" y="1740" width="220" height="220" preserveAspectRatio="xMidYMid meet" />`
-    : '';
-  const venueLine = event.venue
-    ? `<text x="220" y="690" fill="#274069" font-size="74" font-family="Inter, Arial, sans-serif">${escapeHtml(event.venue)}</text>`
-    : '';
-
-  return `
-<svg xmlns="http://www.w3.org/2000/svg" width="3840" height="2160" viewBox="0 0 3840 2160">
-  <rect x="0" y="0" width="3840" height="2160" fill="${tertiary}" />
-  <rect x="100" y="100" rx="72" ry="72" width="3640" height="1960" fill="#ffffff" />
-  <rect x="100" y="100" rx="72" ry="72" width="3640" height="24" fill="${primary}" />
-  <text x="220" y="520" fill="#10213f" font-size="122" font-weight="700" font-family="Inter, Arial, sans-serif">${escapeHtml(event.name || 'Event')}</text>
-  ${venueLine}
-  <text x="220" y="840" fill="#3f4f6d" font-size="58" font-family="Inter, Arial, sans-serif">Scan to open guest search</text>
-  ${logoUrl}
-  <rect x="2110" y="310" width="1460" height="1460" rx="64" ry="64" fill="${tertiary}" />
-  <image href="${qrSvgDataUri}" x="2140" y="340" width="1400" height="1400" preserveAspectRatio="xMidYMid meet" />
-</svg>
-  `.trim();
+function hexToRgb(value) {
+  const hex = String(value || '').trim().replace(/^#/, '');
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return { r: 238, g: 243, b: 255 };
+  return {
+    r: parseInt(hex.slice(0, 2), 16),
+    g: parseInt(hex.slice(2, 4), 16),
+    b: parseInt(hex.slice(4, 6), 16)
+  };
 }
 
 async function getEventByToken(token) {
@@ -1192,9 +1166,40 @@ router.get('/admin/events/:token/qr-export.png', async (req, res) => {
     if (!hasVenueAccess(req, event.venue)) return res.status(403).send('Forbidden');
 
     const publicSearchUrl = getPublicSearchUrl(req, event.public_token);
-    const svg = await buildQrExportSvg(event, publicSearchUrl);
-    const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
+    const qrBuffer = await QRCode.toBuffer(publicSearchUrl, {
+      errorCorrectionLevel: 'H',
+      margin: 1,
+      width: 1400,
+      color: {
+        dark: event.primary_color || '#1f3c88',
+        light: '#ffffff'
+      }
+    });
 
+    const canvas = new PNG({ width: 3840, height: 2160 });
+    const bg = hexToRgb(event.tertiary_color || '#eef3ff');
+    for (let i = 0; i < canvas.data.length; i += 4) {
+      canvas.data[i] = bg.r;
+      canvas.data[i + 1] = bg.g;
+      canvas.data[i + 2] = bg.b;
+      canvas.data[i + 3] = 255;
+    }
+
+    const qr = PNG.sync.read(qrBuffer);
+    const offsetX = Math.floor((3840 - qr.width) / 2);
+    const offsetY = Math.floor((2160 - qr.height) / 2);
+    for (let y = 0; y < qr.height; y += 1) {
+      for (let x = 0; x < qr.width; x += 1) {
+        const src = (qr.width * y + x) * 4;
+        const dst = (canvas.width * (offsetY + y) + (offsetX + x)) * 4;
+        canvas.data[dst] = qr.data[src];
+        canvas.data[dst + 1] = qr.data[src + 1];
+        canvas.data[dst + 2] = qr.data[src + 2];
+        canvas.data[dst + 3] = qr.data[src + 3];
+      }
+    }
+
+    const pngBuffer = PNG.sync.write(canvas);
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Content-Disposition', `attachment; filename="${qrExportFileName(event)}"`);
     return res.send(pngBuffer);
