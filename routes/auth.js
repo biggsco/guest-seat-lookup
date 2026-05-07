@@ -52,8 +52,13 @@ async function getAdminByUsername(username) {
 function renderLoginPage({ next = '/admin/events', username = '', error = '' } = {}) {
   const ssoButton = `
       <div class="field" style="margin-top: 16px;">
-        <a class="button secondary" href="/admin/login/entra?next=${encodeURIComponent(next)}">Sign in with Microsoft</a>
-        ${isEntraEnabled() ? '' : '<p class="muted" style="margin-top: 8px;">Microsoft SSO is not configured on this server yet.</p>'}
+        <a class="button secondary" href="/auth/entra?next=${encodeURIComponent(next)}">
+          Sign in with Microsoft
+        </a>
+        ${isEntraEnabled()
+          ? ''
+          : '<p class="muted" style="margin-top: 8px;">Microsoft SSO is not configured on this server yet.</p>'
+        }
       </div>
     `;
 
