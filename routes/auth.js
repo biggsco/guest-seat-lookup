@@ -26,6 +26,9 @@ function buildNextPath(next) {
   if (normalized.startsWith('/admin/login')) return '/admin/events';
 
   return normalized;
+function buildNextPath(next) {
+  if (!next || typeof next !== 'string') return '/admin/events';
+  return next.startsWith('/') ? next : `/${next}`;
 }
 
 router.get('/auth/entra', (req, res) => {
@@ -48,6 +51,11 @@ router.get('/admin/login', (req, res) => {
 router.get('/admin/login/entra', (req, res) => {
   const nextPath = buildNextPath(req.query.next);
   return res.redirect(302, `/auth/entra?next=${encodeURIComponent(nextPath)}`);
+// Backwards-compatibility route for stale login links.
+router.get('/admin/login/entra', (req, res) => {
+  const nextPath = buildNextPath(req.query.next);
+  const target = `/auth/entra?next=${encodeURIComponent(nextPath)}`;
+  return res.redirect(302, target);
 });
 
 module.exports = router;
