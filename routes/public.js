@@ -8,9 +8,9 @@ router.get('/', (_req, res) => {
     renderLayout(
       'Guest Seating Lookup',
       `
-      <h1>Guest Seating Lookup</h1>
+      <section class="panel"><h1>Guest Seating Lookup</h1>
       <p>Find your table assignment or sign in to manage events.</p>
-      <p><a href="/admin/login?next=/admin/events">Admin sign in</a></p>
+      <p><a class="button" href="/admin/login?next=/admin/events">Admin sign in</a></p></section>
       `
     )
   );

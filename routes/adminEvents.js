@@ -8,9 +8,9 @@ router.get('/admin/events', (_req, res) => {
     renderLayout(
       'Admin Events',
       `
-      <h1>Admin: Events</h1>
+      <section class="panel"><h1>Admin: Events</h1>
       <p>No events are loaded yet.</p>
-      <p><a href="/admin/users">View users</a></p>
+      <p><a class="button" href="/admin/users">View users</a></p></section>
       `
     )
   );

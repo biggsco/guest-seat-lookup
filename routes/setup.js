@@ -8,8 +8,8 @@ router.get('/setup', (_req, res) => {
     renderLayout(
       'Setup',
       `
-      <h1>Setup</h1>
-      <p>Application setup endpoint is reachable.</p>
+      <section class="panel"><h1>Setup</h1>
+      <p>Application setup endpoint is reachable.</p></section>
       `
     )
   );

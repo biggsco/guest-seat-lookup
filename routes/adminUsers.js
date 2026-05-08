@@ -8,9 +8,9 @@ router.get('/admin/users', (_req, res) => {
     renderLayout(
       'Admin Users',
       `
-      <h1>Admin: Users</h1>
+      <section class="panel"><h1>Admin: Users</h1>
       <p>No admin users are configured yet.</p>
-      <p><a href="/admin/events">Back to events</a></p>
+      <p><a class="button" href="/admin/events">Back to events</a></p></section>
       `
     )
   );
