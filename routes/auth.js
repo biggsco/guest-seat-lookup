@@ -1,4 +1,5 @@
 const express = require('express');
+const { renderLayout, escapeHtml } = require('../render');
 
 const router = express.Router();
 
@@ -32,15 +33,49 @@ function buildNextPath(next) {
 router.get('/auth/entra', (req, res) => {
   const nextPath = buildNextPath(req.query.next);
 
-  return res.status(501).json({
-    error: 'Entra auth is not configured yet.',
-    next: nextPath
-  });
+  const isConfigured = Boolean(
+    process.env.ENTRA_TENANT_ID &&
+      process.env.ENTRA_CLIENT_ID &&
+      process.env.ENTRA_CLIENT_SECRET &&
+      process.env.ENTRA_REDIRECT_URI
+  );
+
+  if (!isConfigured) {
+    return res.redirect(
+      302,
+      `/admin/login?next=${encodeURIComponent(nextPath)}&error=${encodeURIComponent(
+        'Entra auth is not configured yet. Ask an admin to set ENTRA_* environment variables.'
+      )}`
+    );
+  }
+
+  return res.status(501).send(
+    renderLayout(
+      'Sign in',
+      `
+      <h1>Sign in unavailable</h1>
+      <p>Entra sign-in is configured, but the callback flow is not implemented on this branch yet.</p>
+      <p><a href="${escapeHtml(nextPath)}">Continue</a></p>
+      `
+    )
+  );
 });
 
 router.get('/admin/login', (req, res) => {
   const nextPath = buildNextPath(req.query.next);
-  return res.redirect(302, `/auth/entra?next=${encodeURIComponent(nextPath)}`);
+  const error = req.query.error ? escapeHtml(req.query.error) : '';
+
+  return res.status(200).send(
+    renderLayout(
+      'Admin Sign in',
+      `
+      <h1>Admin sign in</h1>
+      ${error ? `<div class="result-card">${error}</div>` : ''}
+      <p>Use Microsoft Entra to continue to the admin area.</p>
+      <p><a href="/auth/entra?next=${encodeURIComponent(nextPath)}">Continue with Entra</a></p>
+      `
+    )
+  );
 });
 
 router.get('/admin/login/entra', (req, res) => {
