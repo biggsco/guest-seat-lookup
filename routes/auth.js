@@ -12,6 +12,17 @@ router.get('/auth/logout', (req, res) => {
   });
 });
 
+
+router.get('/auth/entra', (req, res) => {
+  const nextPath = buildNextPath(req.query.next);
+  return res.redirect(302, `/admin/login?next=${encodeURIComponent(nextPath)}&error=${encodeURIComponent('Microsoft Entra login has been removed. Use your admin email and password.')}`);
+});
+
+router.get('/admin/login/entra', (req, res) => {
+  const nextPath = buildNextPath(req.query.next);
+  return res.redirect(302, `/admin/login?next=${encodeURIComponent(nextPath)}&error=${encodeURIComponent('Microsoft Entra login has been removed. Use your admin email and password.')}`);
+});
+
 router.get('/admin/login', (req, res) => {
   const nextPath = buildNextPath(req.query.next);
   const error = req.query.error ? escapeHtml(req.query.error) : '';
