@@ -537,3 +537,35 @@ body {
 .result-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; }
 .event-logo-wrap { margin-bottom: 12px; }
 .event-logo { max-height: 72px; max-width: 220px; object-fit: contain; }
+
+.brand-preview {
+  border-radius: 14px;
+  border: 1px solid #cbd5e1;
+  padding: 16px;
+  background: var(--preview-tertiary, #eef3ff);
+}
+
+.brand-preview-inner {
+  border-radius: 12px;
+  border-left: 8px solid var(--preview-primary, #1f3c88);
+  background: #fff;
+  padding: 16px;
+}
+
+.brand-preview-logo {
+  width: 88px;
+  height: 88px;
+  object-fit: cover;
+  border-radius: 10px;
+}
+
+.brand-preview-logo-placeholder {
+  width: 88px;
+  height: 88px;
+  display: grid;
+  place-items: center;
+  background: #e2e8f0;
+  border-radius: 10px;
+  font-weight: 700;
+  color: #475569;
+}
