@@ -10,6 +10,7 @@ const adminEventRoutes = require('./routes/adminEvents');
 const adminUserRoutes = require('./routes/adminUsers');
 const setupRoutes = require('./routes/setup');
 const { ensureAdminUserTable, upsertSuperAdminFromEnv } = require('./lib/adminUsers');
+const { ensureGuestSeatsTable } = require('./lib/guestSeats');
 
 const app = express();
 const PgSession = pgSession(session);
@@ -42,6 +43,7 @@ app.use('/', setupRoutes);
 
 async function start() {
   await ensureAdminUserTable();
+  await ensureGuestSeatsTable();
   await upsertSuperAdminFromEnv();
 
   app.listen(PORT, HOST, () => {
