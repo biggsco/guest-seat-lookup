@@ -83,12 +83,26 @@ function parseRowsFromWorkbook(buffer) {
     'allocation'
   ];
 
-  return rows
+  const parsedRows = rows
     .map((row) => ({
       guestName: getValue(row, guestAliases),
       tableName: getValue(row, tableAliases)
     }))
     .filter((row) => row.guestName && row.tableName);
+
+  const uniqueRows = [];
+  const seen = new Set();
+
+  for (const row of parsedRows) {
+    const key = row.guestName.toLowerCase();
+
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueRows.push(row);
+    }
+  }
+
+  return uniqueRows;
 }
 
 router.get('/admin/events', requireLogin, (req, res) => {
@@ -106,6 +120,7 @@ router.get('/admin/events', requireLogin, (req, res) => {
           <div>
             <p class="eyebrow">Guest List Manager</p>
             <h1>Upload Seating List</h1>
+
             <p class="muted">
               Drag and drop a CSV or Excel file to upload guest seating data.
             </p>
@@ -167,7 +182,11 @@ router.get('/admin/events', requireLogin, (req, res) => {
             </p>
           </div>
 
-          <button class="button button-wide" type="submit">
+          <button
+            id="submitButton"
+            class="button button-wide"
+            type="submit"
+          >
             Upload Guest List
           </button>
 
@@ -189,6 +208,8 @@ router.get('/admin/events', requireLogin, (req, res) => {
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('guestFile');
         const fileSummary = document.getElementById('fileSummary');
+        const uploadForm = document.getElementById('uploadForm');
+        const submitButton = document.getElementById('submitButton');
 
         function showFile(file) {
           if (!file) {
@@ -245,6 +266,38 @@ router.get('/admin/events', requireLogin, (req, res) => {
 
           showFile(file);
         });
+
+        uploadForm.addEventListener('submit', (event) => {
+          const file = fileInput.files[0];
+
+          if (!file) {
+            event.preventDefault();
+            alert('Please select a file.');
+            return;
+          }
+
+          const validExtensions = ['csv', 'xlsx', 'xls'];
+
+          const extension = file.name
+            .split('.')
+            .pop()
+            .toLowerCase();
+
+          if (!validExtensions.includes(extension)) {
+            event.preventDefault();
+            alert('Invalid file type.');
+            return;
+          }
+
+          if (file.size > 10 * 1024 * 1024) {
+            event.preventDefault();
+            alert('File is too large. Max 10MB.');
+            return;
+          }
+
+          submitButton.disabled = true;
+          submitButton.textContent = 'Uploading...';
+        });
       </script>
       `
     )
@@ -274,6 +327,11 @@ router.post(
       }
 
       const seats = parseRowsFromWorkbook(req.file.buffer);
+
+      console.log({
+        eventName,
+        uploadedRows: seats.length
+      });
 
       if (!seats.length) {
         return res.redirect(
