@@ -461,4 +461,204 @@ router.get('/admin/events', async (req, res) => {
   }
 });
 
+router.get('/admin/events/new', (req, res) => {
+  const allowedVenues = getAllowedVenuesForRequest(req);
+
+  if (!req.session.adminUser.isSuperAdmin && allowedVenues.length === 0) {
+    return res.status(403).send(
+      renderLayout(
+        'Forbidden',
+        `<div class="notice danger">You do not have access to create events.</div>`
+      )
+    );
+  }
+
+  const body = `
+    ${adminNav(req, [{ href: '/admin/events', label: 'Events' }])}
+    <div class="panel">
+      <h1>Create Event</h1>
+      <form method="POST" action="/admin/events/new">
+        <label>Event name</label>
+        <input type="text" name="name" required />
+        <label>Venue</label>
+        <select name="venue" required>${renderVenueOptions('', allowedVenues)}</select>
+        <label>Event date</label>
+        <input type="date" name="event_date" />
+        <div class="actions">
+          <button type="submit">Create Event</button>
+          <a class="button secondary" href="/admin/events">Cancel</a>
+        </div>
+      </form>
+    </div>
+  `;
+
+  return res.send(renderLayout('Create Event', body));
+});
+
+router.post('/admin/events/new', async (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  const venue = parseVenueInput(req.body?.venue);
+  const eventDate = parseEventDateInput(req.body?.event_date);
+
+  if (!name || !venue) {
+    return res.status(400).send(
+      renderLayout('Validation Error', `<div class="notice danger">Event name and venue are required.</div>`)
+    );
+  }
+
+  if (!hasVenueAccess(req, venue)) {
+    return res.status(403).send(
+      renderLayout('Forbidden', `<div class="notice danger">You do not have access to this venue.</div>`)
+    );
+  }
+
+  const token = generateToken();
+  await pool.query(
+    `
+    INSERT INTO events (name, public_token, venue, event_date, is_published)
+    VALUES ($1, $2, $3, $4, false)
+    `,
+    [name, token, venue, eventDate]
+  );
+
+  return res.redirect(`/admin/events/${encodeURIComponent(token)}`);
+});
+
+router.get('/admin/events/:token/upload', async (req, res) => {
+  const event = await getEventByToken(String(req.params.token || '').trim());
+  if (!event) return res.status(404).send(renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`));
+  if (!hasVenueAccess(req, event.venue)) return res.status(403).send(renderLayout('Forbidden', `<div class="notice danger">You do not have access to this event.</div>`));
+
+  const body = `
+    ${adminNav(req, [{ href: '/admin/events', label: 'Events' }])}
+    <div class="panel">
+      <h1>Upload Guest File</h1>
+      <p class="muted">Event: <strong>${escapeHtml(event.name || 'Untitled Event')}</strong></p>
+      <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/upload" enctype="multipart/form-data">
+        <label>Guest list file (CSV/XLS/XLSX)</label>
+        <input type="file" name="file" accept=".csv,.xls,.xlsx" required />
+        <div class="actions">
+          <button type="submit">Preview File</button>
+          <a class="button secondary" href="/admin/events">Back</a>
+        </div>
+      </form>
+    </div>
+  `;
+  return res.send(renderLayout('Upload Guest File', body));
+});
+
+router.post('/admin/events/:token/upload', guestUpload.single('file'), async (req, res) => {
+  const event = await getEventByToken(String(req.params.token || '').trim());
+  if (!event) return res.status(404).send(renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`));
+  if (!hasVenueAccess(req, event.venue)) return res.status(403).send(renderLayout('Forbidden', `<div class="notice danger">You do not have access to this event.</div>`));
+  if (!req.file?.buffer) return res.status(400).send(renderLayout('Upload Error', `<div class="notice danger">Please choose a file to upload.</div>`));
+
+  const parsed = parseWorkbookFromBuffer(req.file.buffer, req.file.originalname || 'upload');
+  const sessionToken = generateUploadToken();
+  uploadSessions.set(sessionToken, { eventId: event.id, parsed });
+
+  const defaultNameIndex = detectColumnIndex(parsed.headers, ['name', 'guest', 'full name']);
+  const defaultCompanyIndex = detectColumnIndex(parsed.headers, ['company', 'organisation', 'organization']);
+  const defaultTableIndex = detectColumnIndex(parsed.headers, ['table', 'seat']);
+
+  const body = `
+    ${adminNav(req, [{ href: '/admin/events', label: 'Events' }])}
+    <div class="panel">
+      <h1>Map Columns</h1>
+      <p class="muted">File: ${escapeHtml(parsed.originalName)}</p>
+      <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/upload/confirm">
+        <input type="hidden" name="upload_token" value="${escapeHtml(sessionToken)}" />
+        <label>Guest Name column</label>
+        ${renderMappingSelect('name_index', parsed.headers, defaultNameIndex)}
+        <label>Company column (optional)</label>
+        ${renderMappingSelect('company_index', parsed.headers, defaultCompanyIndex)}
+        <label>Table column</label>
+        ${renderMappingSelect('table_index', parsed.headers, defaultTableIndex)}
+        <div class="actions">
+          <button type="submit">Import Guests</button>
+        </div>
+      </form>
+      <h2>Preview</h2>
+      ${renderPreviewTable(parsed.headers, parsed.rows, 10)}
+    </div>
+  `;
+  return res.send(renderLayout('Map Upload Columns', body, { fullWidth: true }));
+});
+
+router.post('/admin/events/:token/upload/confirm', async (req, res) => {
+  const event = await getEventByToken(String(req.params.token || '').trim());
+  if (!event) return res.status(404).send(renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`));
+  if (!hasVenueAccess(req, event.venue)) return res.status(403).send(renderLayout('Forbidden', `<div class="notice danger">You do not have access to this event.</div>`));
+
+  const uploadToken = String(req.body?.upload_token || '');
+  const uploadSession = uploadSessions.get(uploadToken);
+  if (!uploadSession || uploadSession.eventId !== event.id) {
+    return res.status(400).send(renderLayout('Upload Error', `<div class="notice danger">Upload session expired. Please upload again.</div>`));
+  }
+
+  const nameIndex = Number(req.body?.name_index);
+  const companyIndex = req.body?.company_index === '' ? null : Number(req.body?.company_index);
+  const tableIndex = Number(req.body?.table_index);
+  const guests = uploadSession.parsed.rows
+    .map((row) => ({
+      fullName: normalizeCell(row[nameIndex]),
+      company: companyIndex === null ? '' : normalizeCell(row[companyIndex]),
+      tableName: normalizeCell(row[tableIndex])
+    }))
+    .filter((row) => row.tableName && (row.fullName || row.company));
+
+  await pool.query('DELETE FROM guests WHERE event_id = $1', [event.id]);
+  for (const row of guests) {
+    await pool.query(
+      'INSERT INTO guests (event_id, full_name, company, table_name) VALUES ($1, $2, $3, $4)',
+      [event.id, row.fullName, row.company, row.tableName]
+    );
+  }
+  await pool.query(
+    'UPDATE events SET last_imported_at = NOW(), last_import_file_name = $2 WHERE id = $1',
+    [event.id, uploadSession.parsed.originalName]
+  );
+  uploadSessions.delete(uploadToken);
+  return res.redirect('/admin/events');
+});
+
+router.get('/admin/events/:token', async (req, res) => {
+  const event = await getEventByToken(String(req.params.token || '').trim());
+
+  if (!event) {
+    return res.status(404).send(renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`));
+  }
+
+  if (!hasVenueAccess(req, event.venue)) {
+    return res.status(403).send(renderLayout('Forbidden', `<div class="notice danger">You do not have access to this event.</div>`));
+  }
+
+  return res.redirect('/admin/events');
+});
+
+router.get('/admin/events/:token/publish', async (req, res) => {
+  const event = await getEventByToken(String(req.params.token || '').trim());
+  if (!event) return res.status(404).send(renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`));
+  if (!hasVenueAccess(req, event.venue)) return res.status(403).send(renderLayout('Forbidden', `<div class="notice danger">You do not have access to this event.</div>`));
+  await pool.query('UPDATE events SET is_published = true WHERE id = $1', [event.id]);
+  return res.redirect('/admin/events');
+});
+
+router.get('/admin/events/:token/unpublish', async (req, res) => {
+  const event = await getEventByToken(String(req.params.token || '').trim());
+  if (!event) return res.status(404).send(renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`));
+  if (!hasVenueAccess(req, event.venue)) return res.status(403).send(renderLayout('Forbidden', `<div class="notice danger">You do not have access to this event.</div>`));
+  await pool.query('UPDATE events SET is_published = false WHERE id = $1', [event.id]);
+  return res.redirect('/admin/events');
+});
+
+router.get('/admin/events/:token/delete', async (req, res) => {
+  const event = await getEventByToken(String(req.params.token || '').trim());
+  if (!event) return res.status(404).send(renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`));
+  if (!hasVenueAccess(req, event.venue)) return res.status(403).send(renderLayout('Forbidden', `<div class="notice danger">You do not have access to this event.</div>`));
+  await pool.query('DELETE FROM guests WHERE event_id = $1', [event.id]);
+  await pool.query('DELETE FROM events WHERE id = $1', [event.id]);
+  return res.redirect('/admin/events');
+});
+
 module.exports = router;
