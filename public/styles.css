@@ -259,6 +259,49 @@ label {
   font-weight: 800;
 }
 
+.dropzone {
+  display: block;
+  border: 2px dashed #93c5fd;
+  border-radius: 14px;
+  padding: 18px;
+  text-align: center;
+  background: #f8fbff;
+  color: #1e3a8a;
+}
+
+.dropzone.dragging {
+  border-color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.search-card h1 {
+  font-size: clamp(2rem, 5vw, 2.8rem);
+  letter-spacing: -0.03em;
+}
+
+.result-card {
+  border-left: 6px solid var(--event-primary, #1f3c88);
+}
+
+.result-card strong {
+  font-size: 1.25rem;
+}
+
+@media (max-width: 700px) {
+  .container {
+    padding: 16px 12px 44px;
+  }
+
+  .panel,
+  .card {
+    padding: 16px;
+  }
+
+  .grid.cards {
+    grid-template-columns: 1fr;
+  }
+}
+
 input,
 select,
 textarea {
