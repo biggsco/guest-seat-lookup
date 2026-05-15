@@ -461,4 +461,106 @@ router.get('/admin/events', async (req, res) => {
   }
 });
 
+router.get('/admin/events/new', (req, res) => {
+  const allowedVenues = getAllowedVenuesForRequest(req);
+
+  if (!req.session.adminUser.isSuperAdmin && allowedVenues.length === 0) {
+    return res.status(403).send(
+      renderLayout(
+        'Forbidden',
+        `<div class="notice danger">You do not have access to create events.</div>`
+      )
+    );
+  }
+
+  const body = `
+    ${adminNav(req, [{ href: '/admin/events', label: 'Events' }])}
+    <div class="panel">
+      <h1>Create Event</h1>
+      <form method="POST" action="/admin/events/new">
+        <label>Event name</label>
+        <input type="text" name="name" required />
+        <label>Venue</label>
+        <select name="venue" required>${renderVenueOptions('', allowedVenues)}</select>
+        <label>Event date</label>
+        <input type="date" name="event_date" />
+        <div class="actions">
+          <button type="submit">Create Event</button>
+          <a class="button secondary" href="/admin/events">Cancel</a>
+        </div>
+      </form>
+    </div>
+  `;
+
+  return res.send(renderLayout('Create Event', body));
+});
+
+router.post('/admin/events/new', async (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  const venue = parseVenueInput(req.body?.venue);
+  const eventDate = parseEventDateInput(req.body?.event_date);
+
+  if (!name || !venue) {
+    return res.status(400).send(
+      renderLayout('Validation Error', `<div class="notice danger">Event name and venue are required.</div>`)
+    );
+  }
+
+  if (!hasVenueAccess(req, venue)) {
+    return res.status(403).send(
+      renderLayout('Forbidden', `<div class="notice danger">You do not have access to this venue.</div>`)
+    );
+  }
+
+  const token = generateToken();
+  await pool.query(
+    `
+    INSERT INTO events (name, public_token, venue, event_date, is_published)
+    VALUES ($1, $2, $3, $4, false)
+    `,
+    [name, token, venue, eventDate]
+  );
+
+  return res.redirect(`/admin/events/${encodeURIComponent(token)}`);
+});
+
+router.get('/admin/events/:token', async (req, res) => {
+  const event = await getEventByToken(String(req.params.token || '').trim());
+
+  if (!event) {
+    return res.status(404).send(renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`));
+  }
+
+  if (!hasVenueAccess(req, event.venue)) {
+    return res.status(403).send(renderLayout('Forbidden', `<div class="notice danger">You do not have access to this event.</div>`));
+  }
+
+  return res.redirect('/admin/events');
+});
+
+router.get('/admin/events/:token/publish', async (req, res) => {
+  const event = await getEventByToken(String(req.params.token || '').trim());
+  if (!event) return res.status(404).send(renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`));
+  if (!hasVenueAccess(req, event.venue)) return res.status(403).send(renderLayout('Forbidden', `<div class="notice danger">You do not have access to this event.</div>`));
+  await pool.query('UPDATE events SET is_published = true WHERE id = $1', [event.id]);
+  return res.redirect('/admin/events');
+});
+
+router.get('/admin/events/:token/unpublish', async (req, res) => {
+  const event = await getEventByToken(String(req.params.token || '').trim());
+  if (!event) return res.status(404).send(renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`));
+  if (!hasVenueAccess(req, event.venue)) return res.status(403).send(renderLayout('Forbidden', `<div class="notice danger">You do not have access to this event.</div>`));
+  await pool.query('UPDATE events SET is_published = false WHERE id = $1', [event.id]);
+  return res.redirect('/admin/events');
+});
+
+router.get('/admin/events/:token/delete', async (req, res) => {
+  const event = await getEventByToken(String(req.params.token || '').trim());
+  if (!event) return res.status(404).send(renderLayout('Not Found', `<div class="notice danger">Event not found.</div>`));
+  if (!hasVenueAccess(req, event.venue)) return res.status(403).send(renderLayout('Forbidden', `<div class="notice danger">You do not have access to this event.</div>`));
+  await pool.query('DELETE FROM guests WHERE event_id = $1', [event.id]);
+  await pool.query('DELETE FROM events WHERE id = $1', [event.id]);
+  return res.redirect('/admin/events');
+});
+
 module.exports = router;
