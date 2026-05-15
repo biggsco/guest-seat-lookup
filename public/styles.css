@@ -259,6 +259,49 @@ label {
   font-weight: 800;
 }
 
+.dropzone {
+  display: block;
+  border: 2px dashed #93c5fd;
+  border-radius: 14px;
+  padding: 18px;
+  text-align: center;
+  background: #f8fbff;
+  color: #1e3a8a;
+}
+
+.dropzone.dragging {
+  border-color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.search-card h1 {
+  font-size: clamp(2rem, 5vw, 2.8rem);
+  letter-spacing: -0.03em;
+}
+
+.result-card {
+  border-left: 6px solid var(--event-primary, #1f3c88);
+}
+
+.result-card strong {
+  font-size: 1.25rem;
+}
+
+@media (max-width: 700px) {
+  .container {
+    padding: 16px 12px 44px;
+  }
+
+  .panel,
+  .card {
+    padding: 16px;
+  }
+
+  .grid.cards {
+    grid-template-columns: 1fr;
+  }
+}
+
 input,
 select,
 textarea {
@@ -494,3 +537,35 @@ body {
 .result-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; }
 .event-logo-wrap { margin-bottom: 12px; }
 .event-logo { max-height: 72px; max-width: 220px; object-fit: contain; }
+
+.brand-preview {
+  border-radius: 14px;
+  border: 1px solid #cbd5e1;
+  padding: 16px;
+  background: var(--preview-tertiary, #eef3ff);
+}
+
+.brand-preview-inner {
+  border-radius: 12px;
+  border-left: 8px solid var(--preview-primary, #1f3c88);
+  background: #fff;
+  padding: 16px;
+}
+
+.brand-preview-logo {
+  width: 88px;
+  height: 88px;
+  object-fit: cover;
+  border-radius: 10px;
+}
+
+.brand-preview-logo-placeholder {
+  width: 88px;
+  height: 88px;
+  display: grid;
+  place-items: center;
+  background: #e2e8f0;
+  border-radius: 10px;
+  font-weight: 700;
+  color: #475569;
+}

@@ -100,6 +100,8 @@ router.get('/e/:token', async (req, res) => {
     let results = [];
 
     if (q) {
+      const parts = q.split(/\s+/).map((part) => part.trim()).filter(Boolean);
+      const likeTerms = parts.map((part) => `%${part}%`);
       const dbResult = await pool.query(
         `
         SELECT full_name, company, table_name
@@ -108,15 +110,24 @@ router.get('/e/:token', async (req, res) => {
           AND (
             full_name ILIKE $2
             OR company ILIKE $2
+            OR (
+              cardinality($3::TEXT[]) > 0
+              AND EXISTS (
+                SELECT 1
+                FROM unnest($3::TEXT[]) AS term
+                WHERE full_name ILIKE term OR company ILIKE term
+              )
+            )
           )
         ORDER BY
+          CASE WHEN full_name ILIKE $4 OR company ILIKE $4 THEN 0 ELSE 1 END,
           CASE
             WHEN COALESCE(NULLIF(full_name, ''), '') = '' THEN company
             ELSE full_name
           END ASC
         LIMIT 50
         `,
-        [event.id, `%${q}%`]
+        [event.id, `%${q}%`, likeTerms, `${q}%`]
       );
 
       results = dbResult.rows;

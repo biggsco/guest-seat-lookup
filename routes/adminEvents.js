@@ -537,6 +537,7 @@ router.get('/admin/events/:token', async (req, res) => {
 
   const publicSearchUrl = getPublicSearchUrl(req, event.public_token);
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(publicSearchUrl)}`;
+  const qrSourceLarge = `https://api.qrserver.com/v1/create-qr-code/?size=1400x1400&data=${encodeURIComponent(publicSearchUrl)}`;
 
   return res.send(renderLayout(`Manage: ${event.name}`, `
     ${adminNav(req, [{ href: '/admin/events', label: 'Events' }])}
@@ -544,21 +545,151 @@ router.get('/admin/events/:token', async (req, res) => {
     <div class="grid two">
       <div class="panel">
         <h2 style="margin-top:0;">Branding & Search Theme</h2>
-        <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/branding" enctype="multipart/form-data">
-          <div class="field"><label>Primary color</label><input type="text" name="primary_color" value="${escapeHtml(event.primary_color || '#1f3c88')}" placeholder="#1f3c88" /></div>
-          <div class="field"><label>Tertiary color</label><input type="text" name="tertiary_color" value="${escapeHtml(event.tertiary_color || '#eef3ff')}" placeholder="#eef3ff" /></div>
-          <div class="field"><label>Client logo</label><input type="file" name="logo" accept="image/png,image/jpeg,image/webp,image/gif" /></div>
+        <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/branding" enctype="multipart/form-data" id="branding-form">
+          <div class="field">
+            <label>Primary color</label>
+            <div class="field-row">
+              <input type="color" id="primary_color_picker" value="${escapeHtml(event.primary_color || '#1f3c88')}" />
+              <input type="text" id="primary_color" name="primary_color" value="${escapeHtml(event.primary_color || '#1f3c88')}" placeholder="#1f3c88" />
+            </div>
+          </div>
+          <div class="field">
+            <label>Tertiary color</label>
+            <div class="field-row">
+              <input type="color" id="tertiary_color_picker" value="${escapeHtml(event.tertiary_color || '#eef3ff')}" />
+              <input type="text" id="tertiary_color" name="tertiary_color" value="${escapeHtml(event.tertiary_color || '#eef3ff')}" placeholder="#eef3ff" />
+            </div>
+          </div>
+          <div class="field">
+            <label>Client logo (must be 1:1 square for best result)</label>
+            <input type="file" id="logo_input" name="logo" accept="image/png,image/jpeg,image/webp,image/gif" />
+            <div class="muted small">Recommended export logo area: 900 × 900 on the final 3840 × 2160 JPEG.</div>
+            <div id="logo_hint" class="muted small"></div>
+          </div>
           ${event.logo_url ? `<div class="field"><label><input type="checkbox" name="remove_logo" value="1" /> Remove current logo</label></div>` : ''}
           <div class="actions"><button type="submit">Save Branding</button><a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/upload">Upload Guests</a></div>
         </form>
+        <div class="panel" style="margin-top:16px; border-style:dashed;">
+          <h3 style="margin-top:0;">Live preview</h3>
+          <div id="brand-preview" class="brand-preview" style="--preview-primary:${escapeHtml(event.primary_color || '#1f3c88')};--preview-tertiary:${escapeHtml(event.tertiary_color || '#eef3ff')};">
+            <div class="brand-preview-inner">
+              ${event.logo_url ? `<img src="${escapeHtml(event.logo_url)}" alt="Current logo" class="brand-preview-logo" />` : '<div class="brand-preview-logo-placeholder">Logo</div>'}
+              <h4>${escapeHtml(event.name)}</h4>
+              <p>Guest seating lookup preview</p>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="panel">
         <h2 style="margin-top:0;">QR Code & Public Link</h2>
         <p class="muted">Share this QR at venue for guest self lookup.</p>
         <div class="qr-panel"><img class="qr-image" src="${qrUrl}" alt="QR code for ${escapeHtml(event.name)}" /></div>
+        <div class="actions">
+          <button type="button" id="export-branded-qr">Export branded JPEG (3840 × 2160)</button>
+        </div>
         <div class="field" style="margin-top:12px;"><label>Public search URL</label><input type="text" readonly value="${escapeHtml(publicSearchUrl)}" /></div>
       </div>
     </div>
+    <script>
+      (function () {
+        const primaryText = document.getElementById('primary_color');
+        const tertiaryText = document.getElementById('tertiary_color');
+        const primaryPicker = document.getElementById('primary_color_picker');
+        const tertiaryPicker = document.getElementById('tertiary_color_picker');
+        const preview = document.getElementById('brand-preview');
+        const logoInput = document.getElementById('logo_input');
+        const logoHint = document.getElementById('logo_hint');
+        const exportButton = document.getElementById('export-branded-qr');
+        const logoDataUrl = ${JSON.stringify(event.logo_url || '')};
+
+        function syncPreview() {
+          const p = primaryText.value || '#1f3c88';
+          const t = tertiaryText.value || '#eef3ff';
+          preview.style.setProperty('--preview-primary', p);
+          preview.style.setProperty('--preview-tertiary', t);
+        }
+
+        [[primaryText, primaryPicker], [tertiaryText, tertiaryPicker]].forEach(([text, picker]) => {
+          text.addEventListener('input', () => { picker.value = text.value || picker.value; syncPreview(); });
+          picker.addEventListener('input', () => { text.value = picker.value; syncPreview(); });
+        });
+
+        if (logoInput && logoHint) {
+          logoInput.addEventListener('change', () => {
+            const file = logoInput.files && logoInput.files[0];
+            if (!file) return;
+            const img = new Image();
+            img.onload = () => {
+              const square = img.naturalWidth === img.naturalHeight;
+              logoHint.textContent = square
+                ? 'Logo is square. Great for 900 × 900 export placement.'
+                : 'Logo is not square. Please use a 1:1 logo for best export quality.';
+            };
+            img.src = URL.createObjectURL(file);
+          });
+        }
+
+        if (exportButton) {
+          exportButton.addEventListener('click', async () => {
+            exportButton.disabled = true;
+            exportButton.textContent = 'Rendering…';
+            try {
+              const canvas = document.createElement('canvas');
+              canvas.width = 3840;
+              canvas.height = 2160;
+              const ctx = canvas.getContext('2d');
+              const p = primaryText.value || '#1f3c88';
+              const t = tertiaryText.value || '#eef3ff';
+
+              ctx.fillStyle = t;
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+              ctx.fillStyle = p;
+              ctx.fillRect(0, 0, canvas.width, 220);
+              ctx.fillRect(0, canvas.height - 220, canvas.width, 220);
+
+              const qr = new Image();
+              qr.crossOrigin = 'anonymous';
+              await new Promise((resolve, reject) => {
+                qr.onload = resolve;
+                qr.onerror = reject;
+                qr.src = ${JSON.stringify(qrSourceLarge)};
+              });
+              ctx.drawImage(qr, 1220, 380, 1400, 1400);
+
+              const file = logoInput && logoInput.files && logoInput.files[0];
+              const logoSrc = file ? URL.createObjectURL(file) : logoDataUrl;
+              if (logoSrc) {
+                const logo = new Image();
+                await new Promise((resolve, reject) => {
+                  logo.onload = resolve;
+                  logo.onerror = reject;
+                  logo.src = logoSrc;
+                });
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(120, 630, 900, 900);
+                ctx.drawImage(logo, 120, 630, 900, 900);
+              }
+
+              ctx.fillStyle = '#111827';
+              ctx.font = 'bold 96px Inter, Arial, sans-serif';
+              ctx.fillText(${JSON.stringify(event.name)}, 1080, 1800);
+              ctx.font = '48px Inter, Arial, sans-serif';
+              ctx.fillText('Scan for guest seating lookup', 1080, 1880);
+
+              const link = document.createElement('a');
+              link.download = 'branded-qr-3840x2160.jpg';
+              link.href = canvas.toDataURL('image/jpeg', 0.92);
+              link.click();
+            } catch (error) {
+              alert('Unable to render branded JPEG export. Please check logo format and try again.');
+            } finally {
+              exportButton.disabled = false;
+              exportButton.textContent = 'Export branded JPEG (3840 × 2160)';
+            }
+          });
+        }
+      })();
+    </script>
   `));
 });
 
@@ -594,16 +725,42 @@ router.get('/admin/events/:token/upload', async (req, res) => {
     <div class="panel" style="max-width: 840px; margin: 0 auto;">
       <h1 style="margin-top: 0;">Upload Guest List</h1>
       <p class="muted"><strong>${escapeHtml(event.name)}</strong> (${escapeHtml(event.venue || 'No venue')})</p>
-      <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/upload" enctype="multipart/form-data">
+      <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/upload" enctype="multipart/form-data" id="upload-form">
         <div class="field">
           <label for="guest_file">CSV / XLSX file</label>
+          <label class="dropzone" for="guest_file" id="dropzone">Drop spreadsheet here or tap to browse</label>
           <input id="guest_file" type="file" name="guest_file" accept=".csv,.xlsx,.xls" required />
+          <div class="muted small">Auto-continues after you drop/select a file.</div>
         </div>
         <div class="actions">
-          <button type="submit">Continue</button>
+          <button type="submit" id="upload-submit">Continue</button>
           <a class="button secondary" href="/admin/events">Cancel</a>
         </div>
       </form>
+      <script>
+        (function(){
+          const form = document.getElementById('upload-form');
+          const fileInput = document.getElementById('guest_file');
+          const dropzone = document.getElementById('dropzone');
+          const submit = document.getElementById('upload-submit');
+          if (!form || !fileInput || !dropzone || !submit) return;
+          const startUpload = () => {
+            if (!fileInput.files || !fileInput.files.length) return;
+            submit.disabled = true;
+            submit.textContent = 'Uploading…';
+            form.submit();
+          };
+          fileInput.addEventListener('change', startUpload);
+          ['dragenter','dragover'].forEach((evt) => dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.add('dragging'); }));
+          ['dragleave','drop'].forEach((evt) => dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.remove('dragging'); }));
+          dropzone.addEventListener('drop', (e) => {
+            const files = e.dataTransfer && e.dataTransfer.files;
+            if (!files || !files.length) return;
+            fileInput.files = files;
+            startUpload();
+          });
+        })();
+      </script>
     </div>`;
 
   return res.send(renderLayout(`Upload: ${event.name}`, body));
@@ -632,15 +789,28 @@ router.post('/admin/events/:token/upload', guestUpload.single('guest_file'), asy
       ${adminNav(req, [{ href: '/admin/events', label: 'Events' }])}
       <div class="panel" style="max-width: 1100px; margin: 0 auto;">
         <h1 style="margin-top:0;">Map Columns</h1>
-        <p class="muted">${escapeHtml(parsed.originalName)} · ${parsed.rows.length} rows detected</p>
+        <div class="notice info">Always remap columns for each upload before importing.</div>
+        <p class="muted">${escapeHtml(parsed.originalName)} · ${parsed.rows.length} rows detected · Sheets: ${escapeHtml((parsed.sheetNames || []).join(', '))}</p>
         ${renderPreviewTable(parsed.headers, parsed.rows, 8)}
         <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/upload/confirm">
           <input type="hidden" name="upload_token" value="${escapeHtml(sessionToken)}" />
           <div class="field"><label>Full name column</label>${renderMappingSelect('full_name_col', headers, nameIndex)}</div>
           <div class="field"><label>Company column</label>${renderMappingSelect('company_col', headers, companyIndex)}</div>
           <div class="field"><label>Table column</label>${renderMappingSelect('table_col', headers, tableIndex)}</div>
-          <div class="actions"><button type="submit">Import Guest List</button><a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/upload">Start over</a></div>
+          <div class="notice" style="margin:12px 0;"><strong>Validation summary:</strong> ${parsed.rows.length} data rows detected. Table mapping is required. Rows without a table are skipped.</div>
+          <div class="actions"><button type="submit" id="import-submit">Import Guest List</button><a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/upload">Start over</a></div>
         </form>
+        <script>
+          (function(){
+            const form = document.querySelector('form[action$="/upload/confirm"]');
+            const button = document.getElementById('import-submit');
+            if (!form || !button) return;
+            form.addEventListener('submit', () => {
+              button.disabled = true;
+              button.textContent = 'Importing…';
+            });
+          })();
+        </script>
       </div>`;
 
     return res.send(renderLayout(`Map Columns: ${event.name}`, body, { fullWidth: true }));
