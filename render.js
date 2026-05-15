@@ -38,21 +38,24 @@ function renderSearchPage(event, q, results) {
 
         ${event.logo_url ? `<img src="${event.logo_url}" class="event-logo" />` : ''}
 
-        <h1>${escapeHtml(event.name)}</h1>
+        <h1 class="search-title">${escapeHtml(event.name)}</h1>
+        <p class="search-subtitle">Find your assigned table in seconds.</p>
 
-        <form method="GET">
-          <input name="q" value="${escapeHtml(q)}" />
-          <button>Search</button>
+        <form method="GET" class="search-form">
+          <input name="q" value="${escapeHtml(q)}" placeholder="Search name or company" />
+          <button type="submit">Search</button>
         </form>
 
         ${
           q
-            ? results.map(r => `
-              <div class="result-card">
-                <strong>${escapeHtml(r.full_name || r.company)}</strong><br/>
-                Table: ${escapeHtml(r.table_name)}
-              </div>
-            `).join('')
+            ? results.length
+              ? `<div class="result-list">${results.map(r => `
+                <div class="result-card">
+                  <strong>${escapeHtml(r.full_name || r.company)}</strong><br/>
+                  Table: ${escapeHtml(r.table_name)}
+                </div>
+              `).join('')}</div>`
+              : `<div class="result-empty">No matching guest found. Please try a different spelling.</div>`
             : ''
         }
 
