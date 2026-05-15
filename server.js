@@ -9,6 +9,8 @@ const authRoutes = require('./routes/auth');
 const adminEventRoutes = require('./routes/adminEvents');
 const adminUserRoutes = require('./routes/adminUsers');
 const setupRoutes = require('./routes/setup');
+const { ensureAdminUserTable, upsertSuperAdminFromEnv } = require('./lib/adminUsers');
+const { ensureGuestSeatsTable } = require('./lib/guestSeats');
 
 const app = express();
 const PgSession = pgSession(session);
@@ -39,6 +41,17 @@ app.use('/', adminEventRoutes);
 app.use('/', adminUserRoutes);
 app.use('/', setupRoutes);
 
-app.listen(PORT, HOST, () => {
-  console.log(`Running on ${PORT}`);
+async function start() {
+  await ensureAdminUserTable();
+  await ensureGuestSeatsTable();
+  await upsertSuperAdminFromEnv();
+
+  app.listen(PORT, HOST, () => {
+    console.log(`Running on ${PORT}`);
+  });
+}
+
+start().catch((err) => {
+  console.error('Failed to start server', err);
+  process.exit(1);
 });
