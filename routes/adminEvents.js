@@ -594,16 +594,42 @@ router.get('/admin/events/:token/upload', async (req, res) => {
     <div class="panel" style="max-width: 840px; margin: 0 auto;">
       <h1 style="margin-top: 0;">Upload Guest List</h1>
       <p class="muted"><strong>${escapeHtml(event.name)}</strong> (${escapeHtml(event.venue || 'No venue')})</p>
-      <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/upload" enctype="multipart/form-data">
+      <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/upload" enctype="multipart/form-data" id="upload-form">
         <div class="field">
           <label for="guest_file">CSV / XLSX file</label>
+          <label class="dropzone" for="guest_file" id="dropzone">Drop spreadsheet here or tap to browse</label>
           <input id="guest_file" type="file" name="guest_file" accept=".csv,.xlsx,.xls" required />
+          <div class="muted small">Auto-continues after you drop/select a file.</div>
         </div>
         <div class="actions">
-          <button type="submit">Continue</button>
+          <button type="submit" id="upload-submit">Continue</button>
           <a class="button secondary" href="/admin/events">Cancel</a>
         </div>
       </form>
+      <script>
+        (function(){
+          const form = document.getElementById('upload-form');
+          const fileInput = document.getElementById('guest_file');
+          const dropzone = document.getElementById('dropzone');
+          const submit = document.getElementById('upload-submit');
+          if (!form || !fileInput || !dropzone || !submit) return;
+          const startUpload = () => {
+            if (!fileInput.files || !fileInput.files.length) return;
+            submit.disabled = true;
+            submit.textContent = 'Uploading…';
+            form.submit();
+          };
+          fileInput.addEventListener('change', startUpload);
+          ['dragenter','dragover'].forEach((evt) => dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.add('dragging'); }));
+          ['dragleave','drop'].forEach((evt) => dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.remove('dragging'); }));
+          dropzone.addEventListener('drop', (e) => {
+            const files = e.dataTransfer && e.dataTransfer.files;
+            if (!files || !files.length) return;
+            fileInput.files = files;
+            startUpload();
+          });
+        })();
+      </script>
     </div>`;
 
   return res.send(renderLayout(`Upload: ${event.name}`, body));
@@ -632,15 +658,28 @@ router.post('/admin/events/:token/upload', guestUpload.single('guest_file'), asy
       ${adminNav(req, [{ href: '/admin/events', label: 'Events' }])}
       <div class="panel" style="max-width: 1100px; margin: 0 auto;">
         <h1 style="margin-top:0;">Map Columns</h1>
-        <p class="muted">${escapeHtml(parsed.originalName)} · ${parsed.rows.length} rows detected</p>
+        <div class="notice info">Always remap columns for each upload before importing.</div>
+        <p class="muted">${escapeHtml(parsed.originalName)} · ${parsed.rows.length} rows detected · Sheets: ${escapeHtml((parsed.sheetNames || []).join(', '))}</p>
         ${renderPreviewTable(parsed.headers, parsed.rows, 8)}
         <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/upload/confirm">
           <input type="hidden" name="upload_token" value="${escapeHtml(sessionToken)}" />
           <div class="field"><label>Full name column</label>${renderMappingSelect('full_name_col', headers, nameIndex)}</div>
           <div class="field"><label>Company column</label>${renderMappingSelect('company_col', headers, companyIndex)}</div>
           <div class="field"><label>Table column</label>${renderMappingSelect('table_col', headers, tableIndex)}</div>
-          <div class="actions"><button type="submit">Import Guest List</button><a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/upload">Start over</a></div>
+          <div class="notice" style="margin:12px 0;"><strong>Validation summary:</strong> ${parsed.rows.length} data rows detected. Table mapping is required. Rows without a table are skipped.</div>
+          <div class="actions"><button type="submit" id="import-submit">Import Guest List</button><a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/upload">Start over</a></div>
         </form>
+        <script>
+          (function(){
+            const form = document.querySelector('form[action$="/upload/confirm"]');
+            const button = document.getElementById('import-submit');
+            if (!form || !button) return;
+            form.addEventListener('submit', () => {
+              button.disabled = true;
+              button.textContent = 'Importing…';
+            });
+          })();
+        </script>
       </div>`;
 
     return res.send(renderLayout(`Map Columns: ${event.name}`, body, { fullWidth: true }));
