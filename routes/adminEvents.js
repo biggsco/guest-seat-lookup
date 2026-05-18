@@ -22,6 +22,7 @@ const {
   imageBufferToDataUrl
 } = require('../lib/uploads');
 const { VENUE_OPTIONS, canAccessVenue } = require('../lib/venues');
+const QRCode = require('qrcode');
 
 const router = express.Router();
 
@@ -583,7 +584,7 @@ router.get('/admin/events/:token', async (req, res) => {
       <div class="panel">
         <h2 style="margin-top:0;">QR Code & Public Link</h2>
         <p class="muted">Share this QR at venue for guest self lookup.</p>
-        <div class="qr-panel"><img class="qr-image" src="${qrUrl}" alt="QR code for ${escapeHtml(event.name)}" /></div>
+        <div class="qr-panel"><img class="qr-image" src="${qrUrl}" alt="QR code for ${escapeHtml(event.name)}" /><div class="actions"><a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/qr.png">Download PNG QR</a></div></div>
         <div class="actions">
           <button type="button" id="export-branded-qr">Export branded JPEG (3840 × 2160)</button>
         </div>
@@ -713,6 +714,7 @@ router.post('/admin/events/:token/branding', logoUpload.single('logo'), async (r
   await pool.query('UPDATE events SET primary_color = $2, tertiary_color = $3, logo_url = $4 WHERE id = $1', [event.id, primaryColor, tertiaryColor, logoUrl]);
   return res.redirect(`/admin/events/${encodeURIComponent(event.public_token)}`);
 });
+
 
 
 router.get('/admin/events/:token/upload', async (req, res) => {
@@ -864,6 +866,17 @@ router.post('/admin/events/:token/upload/confirm', async (req, res) => {
   return res.redirect('/admin/events');
 });
 
+
+
+router.get('/admin/events/:token/qr.png', async (req, res) => {
+  const event = await getEventByToken((req.params.token || '').trim());
+  if (!event || !event.is_published || !hasVenueAccess(req, event.venue)) return res.status(404).send('Not found');
+  const publicSearchUrl = getPublicSearchUrl(req, event.public_token);
+  const png = await QRCode.toBuffer(publicSearchUrl, { width: 1200, margin: 1 });
+  res.setHeader('Content-Type', 'image/png');
+  res.setHeader('Content-Disposition', `attachment; filename="${event.public_token}-qr.png"`);
+  return res.send(png);
+});
 
 router.get('/admin/events/:token/upload', async (req, res) => {
   const event = await getEventByToken(String(req.params.token || '').trim());
