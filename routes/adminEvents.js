@@ -673,9 +673,9 @@ router.get('/admin/events/:token', async (req, res) => {
 
               ctx.fillStyle = '#111827';
               ctx.font = 'bold 96px Inter, Arial, sans-serif';
-              ctx.fillText(${JSON.stringify(event.name)}, 1080, 1800);
+              ctx.fillText(${JSON.stringify(event.name)}, 140, 350);
               ctx.font = '48px Inter, Arial, sans-serif';
-              ctx.fillText('Scan for guest seating lookup', 1080, 1880);
+              ctx.fillText('Scan for guest seating lookup', 140, 430);
 
               const link = document.createElement('a');
               link.download = 'branded-qr-3840x2160.jpg';
@@ -784,6 +784,8 @@ router.post('/admin/events/:token/upload', guestUpload.single('guest_file'), asy
 
     const headers = parsed.headers;
     const nameIndex = detectColumnIndex(headers, ['full name', 'name', 'guest name', 'attendee']);
+    const firstNameIndex = detectColumnIndex(headers, ['first name', 'firstname', 'given name', 'first']);
+    const lastNameIndex = detectColumnIndex(headers, ['last name', 'lastname', 'surname', 'family name', 'last']);
     const companyIndex = detectColumnIndex(headers, ['company', 'organisation', 'organization', 'business']);
     const tableIndex = detectColumnIndex(headers, ['table', 'table name', 'table no', 'table number', 'seat']);
 
@@ -797,6 +799,8 @@ router.post('/admin/events/:token/upload', guestUpload.single('guest_file'), asy
         <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/upload/confirm">
           <input type="hidden" name="upload_token" value="${escapeHtml(sessionToken)}" />
           <div class="field"><label>Full name column</label>${renderMappingSelect('full_name_col', headers, nameIndex)}</div>
+          <div class="field"><label>First name column</label>${renderMappingSelect('first_name_col', headers, firstNameIndex)}</div>
+          <div class="field"><label>Last name column</label>${renderMappingSelect('last_name_col', headers, lastNameIndex)}</div>
           <div class="field"><label>Company column</label>${renderMappingSelect('company_col', headers, companyIndex)}</div>
           <div class="field"><label>Table column</label>${renderMappingSelect('table_col', headers, tableIndex)}</div>
           <div class="notice" style="margin:12px 0;"><strong>Validation summary:</strong> ${parsed.rows.length} data rows detected. Table mapping is required. Rows without a table are skipped.</div>
@@ -833,6 +837,8 @@ router.post('/admin/events/:token/upload/confirm', async (req, res) => {
   }
 
   const fullNameCol = Number(req.body.full_name_col);
+  const firstNameCol = Number(req.body.first_name_col);
+  const lastNameCol = Number(req.body.last_name_col);
   const companyCol = Number(req.body.company_col);
   const tableCol = Number(req.body.table_col);
 
@@ -840,11 +846,18 @@ router.post('/admin/events/:token/upload/confirm', async (req, res) => {
     return res.status(400).send(renderLayout('Mapping Error', '<div class="notice danger">Table column is required.</div>'));
   }
 
-  const rows = state.parsed.rows.map((row) => ({
-    fullName: Number.isInteger(fullNameCol) && fullNameCol >= 0 ? normalizeCell(row[fullNameCol]) : '',
-    company: Number.isInteger(companyCol) && companyCol >= 0 ? normalizeCell(row[companyCol]) : '',
-    tableName: normalizeCell(row[tableCol])
-  })).filter((r) => r.tableName && (r.fullName || r.company));
+  const rows = state.parsed.rows.map((row) => {
+    const fullName = Number.isInteger(fullNameCol) && fullNameCol >= 0 ? normalizeCell(row[fullNameCol]) : '';
+    const firstName = Number.isInteger(firstNameCol) && firstNameCol >= 0 ? normalizeCell(row[firstNameCol]) : '';
+    const lastName = Number.isInteger(lastNameCol) && lastNameCol >= 0 ? normalizeCell(row[lastNameCol]) : '';
+    const combinedName = [firstName, lastName].filter(Boolean).join(' ').trim();
+
+    return {
+      fullName: fullName || combinedName,
+      company: Number.isInteger(companyCol) && companyCol >= 0 ? normalizeCell(row[companyCol]) : '',
+      tableName: normalizeCell(row[tableCol])
+    };
+  }).filter((r) => r.tableName && (r.fullName || r.company));
 
   const client = await pool.connect();
   try {
@@ -919,6 +932,8 @@ router.post('/admin/events/:token/upload', guestUpload.single('guest_file'), asy
 
     const headers = parsed.headers;
     const nameIndex = detectColumnIndex(headers, ['full name', 'name', 'guest name', 'attendee']);
+    const firstNameIndex = detectColumnIndex(headers, ['first name', 'firstname', 'given name', 'first']);
+    const lastNameIndex = detectColumnIndex(headers, ['last name', 'lastname', 'surname', 'family name', 'last']);
     const companyIndex = detectColumnIndex(headers, ['company', 'organisation', 'organization', 'business']);
     const tableIndex = detectColumnIndex(headers, ['table', 'table name', 'table no', 'table number', 'seat']);
 
@@ -931,6 +946,8 @@ router.post('/admin/events/:token/upload', guestUpload.single('guest_file'), asy
         <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/upload/confirm">
           <input type="hidden" name="upload_token" value="${escapeHtml(sessionToken)}" />
           <div class="field"><label>Full name column</label>${renderMappingSelect('full_name_col', headers, nameIndex)}</div>
+          <div class="field"><label>First name column</label>${renderMappingSelect('first_name_col', headers, firstNameIndex)}</div>
+          <div class="field"><label>Last name column</label>${renderMappingSelect('last_name_col', headers, lastNameIndex)}</div>
           <div class="field"><label>Company column</label>${renderMappingSelect('company_col', headers, companyIndex)}</div>
           <div class="field"><label>Table column</label>${renderMappingSelect('table_col', headers, tableIndex)}</div>
           <div class="actions"><button type="submit">Import Guest List</button><a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/upload">Start over</a></div>
@@ -955,6 +972,8 @@ router.post('/admin/events/:token/upload/confirm', async (req, res) => {
   }
 
   const fullNameCol = Number(req.body.full_name_col);
+  const firstNameCol = Number(req.body.first_name_col);
+  const lastNameCol = Number(req.body.last_name_col);
   const companyCol = Number(req.body.company_col);
   const tableCol = Number(req.body.table_col);
 
@@ -962,11 +981,18 @@ router.post('/admin/events/:token/upload/confirm', async (req, res) => {
     return res.status(400).send(renderLayout('Mapping Error', '<div class="notice danger">Table column is required.</div>'));
   }
 
-  const rows = state.parsed.rows.map((row) => ({
-    fullName: Number.isInteger(fullNameCol) && fullNameCol >= 0 ? normalizeCell(row[fullNameCol]) : '',
-    company: Number.isInteger(companyCol) && companyCol >= 0 ? normalizeCell(row[companyCol]) : '',
-    tableName: normalizeCell(row[tableCol])
-  })).filter((r) => r.tableName && (r.fullName || r.company));
+  const rows = state.parsed.rows.map((row) => {
+    const fullName = Number.isInteger(fullNameCol) && fullNameCol >= 0 ? normalizeCell(row[fullNameCol]) : '';
+    const firstName = Number.isInteger(firstNameCol) && firstNameCol >= 0 ? normalizeCell(row[firstNameCol]) : '';
+    const lastName = Number.isInteger(lastNameCol) && lastNameCol >= 0 ? normalizeCell(row[lastNameCol]) : '';
+    const combinedName = [firstName, lastName].filter(Boolean).join(' ').trim();
+
+    return {
+      fullName: fullName || combinedName,
+      company: Number.isInteger(companyCol) && companyCol >= 0 ? normalizeCell(row[companyCol]) : '',
+      tableName: normalizeCell(row[tableCol])
+    };
+  }).filter((r) => r.tableName && (r.fullName || r.company));
 
   const client = await pool.connect();
   try {
