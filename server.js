@@ -17,6 +17,15 @@ const PgSession = pgSession(session);
 
 const PORT = process.env.PORT || 10000;
 const HOST = '0.0.0.0';
+const isProduction = process.env.NODE_ENV === 'production';
+
+if (isProduction && !process.env.SESSION_SECRET) {
+  throw new Error('SESSION_SECRET is required in production.');
+}
+
+if (isProduction) {
+  app.set('trust proxy', 1);
+}
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -31,7 +40,13 @@ app.use(
     }),
     secret: process.env.SESSION_SECRET || 'dev_secret',
     resave: false,
-    saveUninitialized: false
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: isProduction,
+      maxAge: 1000 * 60 * 60 * 12
+    }
   })
 );
 
