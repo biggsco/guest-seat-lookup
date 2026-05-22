@@ -57,7 +57,14 @@ app.use((req, res, next) => {
   req.csrfToken = () => req.session.csrfToken;
 
   if (req.method === 'POST' && req.path.startsWith('/admin')) {
-    if (!req.body || req.body._csrf !== req.session.csrfToken) {
+    const providedToken = String(
+      (req.body && req.body._csrf)
+      || req.query._csrf
+      || req.get('x-csrf-token')
+      || ''
+    );
+
+    if (providedToken !== req.session.csrfToken) {
       return res.status(403).send('Invalid CSRF token.');
     }
   }
@@ -66,9 +73,25 @@ app.use((req, res, next) => {
   res.send = function patchedSend(body) {
     if (typeof body === 'string' && body.includes('<form') && body.includes('method="POST"')) {
       const tokenField = `<input type="hidden" name="_csrf" value="${req.csrfToken()}" />`;
-      body = body.replace(/(<form\b[^>]*method="POST"[^>]*>)/g, (match) => (
-        match.includes('name="_csrf"') ? match : `${match}\n${tokenField}`
-      ));
+      body = body.replace(/<form\b[^>]*method="POST"[^>]*>/g, (match) => {
+        let updated = match;
+
+        if (!updated.includes('name="_csrf"')) {
+          updated = `${updated}\n${tokenField}`;
+        }
+
+        const actionMatch = updated.match(/\baction="([^"]*)"/);
+        if (actionMatch) {
+          const actionUrl = actionMatch[1];
+          if (!actionUrl.includes('_csrf=')) {
+            const joiner = actionUrl.includes('?') ? '&' : '?';
+            const nextAction = `${actionUrl}${joiner}_csrf=${encodeURIComponent(req.csrfToken())}`;
+            updated = updated.replace(/\baction="([^"]*)"/, `action="${nextAction}"`);
+          }
+        }
+
+        return updated;
+      });
     }
     return originalSend(body);
   };

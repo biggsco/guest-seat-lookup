@@ -193,6 +193,36 @@ textarea {
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
+input[type='color'] {
+  min-height: 44px;
+  padding: 4px;
+  cursor: pointer;
+}
+
+input[type='color']::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+input[type='color']::-webkit-color-swatch {
+  border: none;
+  border-radius: 8px;
+}
+
+.color-preview {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.color-swatch {
+  width: 48px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  display: inline-block;
+}
+
 input:focus,
 select:focus,
 textarea:focus {
