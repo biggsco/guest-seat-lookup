@@ -49,6 +49,33 @@ app.use(
   })
 );
 
+app.use((req, res, next) => {
+  if (!req.session.csrfToken) {
+    req.session.csrfToken = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  }
+
+  req.csrfToken = () => req.session.csrfToken;
+
+  if (req.method === 'POST' && req.path.startsWith('/admin')) {
+    if (!req.body || req.body._csrf !== req.session.csrfToken) {
+      return res.status(403).send('Invalid CSRF token.');
+    }
+  }
+
+  const originalSend = res.send.bind(res);
+  res.send = function patchedSend(body) {
+    if (typeof body === 'string' && body.includes('<form') && body.includes('method="POST"')) {
+      const tokenField = `<input type="hidden" name="_csrf" value="${req.csrfToken()}" />`;
+      body = body.replace(/(<form\b[^>]*method="POST"[^>]*>)/g, (match) => (
+        match.includes('name="_csrf"') ? match : `${match}\n${tokenField}`
+      ));
+    }
+    return originalSend(body);
+  };
+
+  return next();
+});
+
 app.use(publicRoutes);
 app.use(authRoutes);
 app.use(adminEventRoutes);

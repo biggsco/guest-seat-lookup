@@ -27,6 +27,14 @@ const { VENUE_OPTIONS, canAccessVenue } = require('../lib/venues');
 const router = express.Router();
 router.use('/admin', requireAdmin);
 
+function renderPostActionButton(action, label, className = 'button secondary') {
+  return `
+    <form method="POST" action="${action}" style="display:inline;">
+      <button class="${className}" type="submit">${label}</button>
+    </form>
+  `;
+}
+
 const uploadSessions = new Map();
 function generateToken() {
   return Math.random().toString(36).slice(2, 10);
@@ -311,8 +319,8 @@ router.get('/admin/events', async (req, res) => {
                     <a class="button secondary" href="/admin/events/${encodeURIComponent(e.public_token || '')}/upload">Upload File</a>
                     ${
                       e.is_published
-                        ? `<a class="button secondary" href="/admin/events/${encodeURIComponent(e.public_token || '')}/unpublish">Unpublish</a>`
-                        : `<a class="button success" href="/admin/events/${encodeURIComponent(e.public_token || '')}/publish">Publish</a>`
+                        ? renderPostActionButton(`/admin/events/${encodeURIComponent(e.public_token || '')}/unpublish`, 'Unpublish')
+                        : renderPostActionButton(`/admin/events/${encodeURIComponent(e.public_token || '')}/publish`, 'Publish', 'button success')
                     }
                     <a class="button danger" href="/admin/events/${encodeURIComponent(e.public_token || '')}/delete">Delete</a>
                   </div>
@@ -534,8 +542,8 @@ router.get('/admin/events/:token', async (req, res) => {
               <a class="button" href="/admin/events/${encodeURIComponent(event.public_token)}/upload">Upload Guest File</a>
               ${
                 event.is_published
-                  ? `<a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/unpublish">Unpublish</a>`
-                  : `<a class="button success" href="/admin/events/${encodeURIComponent(event.public_token)}/publish">Publish</a>`
+                  ? renderPostActionButton(`/admin/events/${encodeURIComponent(event.public_token)}/unpublish`, 'Unpublish')
+                  : renderPostActionButton(`/admin/events/${encodeURIComponent(event.public_token)}/publish`, 'Publish', 'button success')
               }
             </div>
           </div>
@@ -1141,7 +1149,9 @@ router.post('/admin/uploads/:uploadToken/import', async (req, res) => {
   }
 });
 
-router.get('/admin/events/:token/publish', async (req, res) => {
+router.get('/admin/events/:token/publish', (req, res) => res.status(405).send('Method Not Allowed'));
+
+router.post('/admin/events/:token/publish', async (req, res) => {
   const token = req.params.token;
 
   try {
@@ -1200,7 +1210,9 @@ router.get('/admin/events/:token/qr-export.svg', async (req, res) => {
   }
 });
 
-router.get('/admin/events/:token/unpublish', async (req, res) => {
+router.get('/admin/events/:token/unpublish', (req, res) => res.status(405).send('Method Not Allowed'));
+
+router.post('/admin/events/:token/unpublish', async (req, res) => {
   const token = req.params.token;
 
   try {
