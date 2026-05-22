@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const { pool, testDb } = require('../db');
 const { escapeHtml, renderLayout } = require('../render');
 const { formatDateTime } = require('../lib/formatting');
+const { requireAdmin, requireSuperAdmin } = require('../lib/auth');
 const { VENUE_OPTIONS } = require('../lib/venues');
 
 const router = express.Router();
@@ -61,6 +62,108 @@ async function ensureAtLeastOneSuperAdmin() {
   `);
 }
 
+async function runSetupMigrations() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS events (
+      id SERIAL PRIMARY KEY,
+      name TEXT,
+      public_token TEXT UNIQUE,
+      is_published BOOLEAN DEFAULT false,
+      logo_url TEXT,
+      primary_color TEXT,
+      tertiary_color TEXT,
+      venue TEXT,
+      event_date DATE,
+      last_imported_at TIMESTAMP,
+      last_import_file_name TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS guests (
+      id SERIAL PRIMARY KEY,
+      event_id INTEGER REFERENCES events(id),
+      full_name TEXT,
+      company TEXT,
+      table_name TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admins (
+      id SERIAL PRIMARY KEY,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      is_super_admin BOOLEAN DEFAULT false,
+      allowed_venues TEXT[] DEFAULT ARRAY[]::TEXT[],
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS public_token TEXT;`);
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT false;`);
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS logo_url TEXT;`);
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS primary_color TEXT;`);
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS tertiary_color TEXT;`);
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS venue TEXT;`);
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS event_date DATE;`);
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS last_imported_at TIMESTAMP;`);
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS last_import_file_name TEXT;`);
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();`);
+  await pool.query(`ALTER TABLE guests ADD COLUMN IF NOT EXISTS company TEXT;`);
+  await pool.query(`ALTER TABLE guests ADD COLUMN IF NOT EXISTS table_name TEXT;`);
+  await pool.query(`ALTER TABLE guests ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();`);
+  await pool.query(`ALTER TABLE admins ADD COLUMN IF NOT EXISTS is_super_admin BOOLEAN DEFAULT false;`);
+  await pool.query(`ALTER TABLE admins ADD COLUMN IF NOT EXISTS allowed_venues TEXT[] DEFAULT ARRAY[]::TEXT[];`);
+
+  await pool.query(
+    `
+    UPDATE admins
+    SET allowed_venues = $1
+    WHERE is_super_admin = true
+      AND (allowed_venues IS NULL OR cardinality(allowed_venues) = 0)
+    `,
+    [VENUE_OPTIONS]
+  );
+
+  await pool.query(`
+    UPDATE events
+    SET primary_color = '#1f3c88'
+    WHERE primary_color IS NULL OR primary_color = '';
+  `);
+
+  await pool.query(`
+    UPDATE events
+    SET tertiary_color = '#eef3ff'
+    WHERE tertiary_color IS NULL OR tertiary_color = '';
+  `);
+
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS events_public_token_idx ON events(public_token);`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS admins_username_idx ON admins(username);`);
+
+  const initialAdminResult = await ensureInitialAdmin();
+  await ensureAtLeastOneSuperAdmin();
+  return initialAdminResult;
+}
+
+function runMiddleware(mw, req, res) {
+  return new Promise((resolve, reject) => {
+    mw(req, res, (err) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function getSetupTokenFromRequest(req) {
+  return String(req.get('x-setup-token') || req.query.setupToken || req.query.token || '').trim();
+}
+
 router.get('/health', async (req, res) => {
   try {
     const db = await testDb();
@@ -81,159 +184,29 @@ router.get('/health', async (req, res) => {
 });
 
 router.get('/setup', async (req, res) => {
-  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_SETUP_ROUTE !== 'true') {
-    return res.status(404).send('Not Found');
+  const setupToken = String(process.env.SETUP_TOKEN || '').trim();
+  const providedToken = getSetupTokenFromRequest(req);
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  if (!setupToken || providedToken !== setupToken) {
+    if (isProduction) {
+      return res.status(404).send('Not Found');
+    }
+    return res.status(403).send('Setup is disabled. Provide a valid setup token.');
   }
 
   try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS events (
-        id SERIAL PRIMARY KEY,
-        name TEXT,
-        public_token TEXT UNIQUE,
-        is_published BOOLEAN DEFAULT false,
-        logo_url TEXT,
-        primary_color TEXT,
-        tertiary_color TEXT,
-        venue TEXT,
-        event_date DATE,
-        last_imported_at TIMESTAMP,
-        last_import_file_name TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
+    const adminsCountResult = await pool.query('SELECT COUNT(*)::INT AS count FROM admins;');
+    const adminCount = Number(adminsCountResult.rows[0]?.count || 0);
 
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS guests (
-        id SERIAL PRIMARY KEY,
-        event_id INTEGER REFERENCES events(id),
-        full_name TEXT,
-        company TEXT,
-        table_name TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
+    if (adminCount > 0) {
+      await runMiddleware(requireAdmin, req, res);
+      if (res.headersSent) return;
+      await runMiddleware(requireSuperAdmin, req, res);
+      if (res.headersSent) return;
+    }
 
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS admins (
-        id SERIAL PRIMARY KEY,
-        username TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        is_super_admin BOOLEAN DEFAULT false,
-        allowed_venues TEXT[] DEFAULT ARRAY[]::TEXT[],
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-
-    await pool.query(`
-      ALTER TABLE events
-      ADD COLUMN IF NOT EXISTS public_token TEXT;
-    `);
-
-    await pool.query(`
-      ALTER TABLE events
-      ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT false;
-    `);
-
-    await pool.query(`
-      ALTER TABLE events
-      ADD COLUMN IF NOT EXISTS logo_url TEXT;
-    `);
-
-    await pool.query(`
-      ALTER TABLE events
-      ADD COLUMN IF NOT EXISTS primary_color TEXT;
-    `);
-
-    await pool.query(`
-      ALTER TABLE events
-      ADD COLUMN IF NOT EXISTS tertiary_color TEXT;
-    `);
-
-    await pool.query(`
-      ALTER TABLE events
-      ADD COLUMN IF NOT EXISTS venue TEXT;
-    `);
-
-    await pool.query(`
-      ALTER TABLE events
-      ADD COLUMN IF NOT EXISTS event_date DATE;
-    `);
-
-    await pool.query(`
-      ALTER TABLE events
-      ADD COLUMN IF NOT EXISTS last_imported_at TIMESTAMP;
-    `);
-
-    await pool.query(`
-      ALTER TABLE events
-      ADD COLUMN IF NOT EXISTS last_import_file_name TEXT;
-    `);
-
-    await pool.query(`
-      ALTER TABLE events
-      ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
-    `);
-
-    await pool.query(`
-      ALTER TABLE guests
-      ADD COLUMN IF NOT EXISTS company TEXT;
-    `);
-
-    await pool.query(`
-      ALTER TABLE guests
-      ADD COLUMN IF NOT EXISTS table_name TEXT;
-    `);
-
-    await pool.query(`
-      ALTER TABLE guests
-      ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
-    `);
-
-    await pool.query(`
-      ALTER TABLE admins
-      ADD COLUMN IF NOT EXISTS is_super_admin BOOLEAN DEFAULT false;
-    `);
-
-    await pool.query(`
-      ALTER TABLE admins
-      ADD COLUMN IF NOT EXISTS allowed_venues TEXT[] DEFAULT ARRAY[]::TEXT[];
-    `);
-
-    await pool.query(
-      `
-      UPDATE admins
-      SET allowed_venues = $1
-      WHERE is_super_admin = true
-        AND (allowed_venues IS NULL OR cardinality(allowed_venues) = 0)
-      `,
-      [VENUE_OPTIONS]
-    );
-
-    await pool.query(`
-      UPDATE events
-      SET primary_color = '#1f3c88'
-      WHERE primary_color IS NULL OR primary_color = '';
-    `);
-
-    await pool.query(`
-      UPDATE events
-      SET tertiary_color = '#eef3ff'
-      WHERE tertiary_color IS NULL OR tertiary_color = '';
-    `);
-
-    await pool.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS events_public_token_idx
-      ON events(public_token);
-    `);
-
-    await pool.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS admins_username_idx
-      ON admins(username);
-    `);
-
-    const initialAdminResult = await ensureInitialAdmin();
-    await ensureAtLeastOneSuperAdmin();
+    const initialAdminResult = await runSetupMigrations();
     const initialAdminMessage = initialAdminResult.status === 'created'
       ? `
         <div class="notice info" style="margin-bottom: 14px;">

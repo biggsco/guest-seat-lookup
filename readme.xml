@@ -7,3 +7,11 @@ Routes:
 - /search
 - /admin
 - /health
+
+## Setup bootstrap flow
+
+1. Set a one-time setup token in `SETUP_TOKEN`.
+2. Run setup by visiting `/setup` with the matching token via query string (`?setupToken=...` or `?token=...`) or `x-setup-token` header.
+3. On first bootstrap, set `ADMIN_USERNAME` and `ADMIN_PASSWORD` before calling `/setup` to auto-create the initial super-admin.
+4. After at least one admin exists, `/setup` requires an authenticated super-admin session plus a valid setup token.
+5. After setup/migrations are complete, disable setup by clearing `SETUP_TOKEN` (and keep it unset in production).
