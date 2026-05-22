@@ -680,7 +680,7 @@ router.get('/admin/events/:token', async (req, res) => {
 
             <hr style="margin: 24px 0;" />
 
-            <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/logo" enctype="multipart/form-data">
+            <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/logo?_csrf=${encodeURIComponent(req.csrfToken())}" enctype="multipart/form-data">
               <div class="field">
                 <label for="logoFile">Event Logo</label>
                 <input id="logoFile" type="file" name="logoFile" accept=".png,.jpg,.jpeg,.webp,.gif,image/*" />

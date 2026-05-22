@@ -57,7 +57,14 @@ app.use((req, res, next) => {
   req.csrfToken = () => req.session.csrfToken;
 
   if (req.method === 'POST' && req.path.startsWith('/admin')) {
-    if (!req.body || req.body._csrf !== req.session.csrfToken) {
+    const providedToken = String(
+      (req.body && req.body._csrf)
+      || req.query._csrf
+      || req.get('x-csrf-token')
+      || ''
+    );
+
+    if (providedToken !== req.session.csrfToken) {
       return res.status(403).send('Invalid CSRF token.');
     }
   }
