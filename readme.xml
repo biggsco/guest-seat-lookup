@@ -8,6 +8,28 @@ Routes:
 - /admin
 - /health
 
+## Database environment setup
+
+`DATABASE_URL` is required at startup and is used as the primary PostgreSQL connection source.
+
+### Recommended local development env
+
+- `NODE_ENV=development`
+- `DATABASE_URL=postgres://<user>:<password>@localhost:<port>/<db_name>`
+- Optional: `DB_SSL=false` (explicitly disable SSL)
+- Optional: `PGSSLMODE=disable`
+
+Default local behavior is `ssl: false` when no SSL-related env vars are set.
+
+### Recommended hosted/production env
+
+- `NODE_ENV=production`
+- `DATABASE_URL=<hosted provider connection string>`
+- Optional: `DB_SSL=true` (force SSL on)
+- Optional: `PGSSLMODE=require` (or provider-required mode)
+- Optional: `DB_SSL_REJECT_UNAUTHORIZED=true` if your provider supplies a trusted cert chain and you want strict verification
+
+Default production behavior enables SSL with `rejectUnauthorized: false` unless overridden via env vars.
 ## Setup bootstrap flow
 
 1. Set a one-time setup token in `SETUP_TOKEN`.
