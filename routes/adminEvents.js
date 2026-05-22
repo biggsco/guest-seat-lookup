@@ -82,6 +82,11 @@ function hasVenueAccess(req, venue) {
   return canAccessVenue(getAllowedVenuesForRequest(req), venue);
 }
 
+function getSafeLogoDataUrl(value) {
+  const logoUrl = String(value || '').trim();
+  return logoUrl.startsWith('data:image/') ? logoUrl : '';
+}
+
 function isPastEvent(eventDate) {
   if (!eventDate) return false;
   const date = new Date(`${eventDate}T00:00:00+09:30`);
@@ -125,8 +130,9 @@ async function buildQrExportSvg(event, publicSearchUrl) {
   const qrSvgDataUri = `data:image/svg+xml;base64,${Buffer.from(qrSvgRaw).toString('base64')}`;
   const tertiary = escapeHtml(event.tertiary_color || '#eef3ff');
   const primary = escapeHtml(event.primary_color || '#1f3c88');
-  const logoUrl = event.logo_url
-    ? `<image href="${escapeHtml(event.logo_url)}" x="220" y="1740" width="220" height="220" preserveAspectRatio="xMidYMid meet" />`
+  const safeLogoUrl = getSafeLogoDataUrl(event.logo_url);
+  const logoUrl = safeLogoUrl
+    ? `<image href="${escapeHtml(safeLogoUrl)}" x="220" y="1740" width="220" height="220" preserveAspectRatio="xMidYMid meet" />`
     : '';
   const venueLine = event.venue
     ? `<text x="220" y="690" fill="#274069" font-size="74" font-family="Inter, Arial, sans-serif">${escapeHtml(event.venue)}</text>`
@@ -278,8 +284,8 @@ router.get('/admin/events', async (req, res) => {
                   </div>
 
                   ${
-                    e.logo_url
-                      ? `<div style="margin: 12px 0 6px;"><img src="${escapeHtml(e.logo_url)}" alt="Logo" style="max-width: 56px; max-height: 56px; border-radius: 8px; display: block;" /></div>`
+                    getSafeLogoDataUrl(e.logo_url)
+                      ? `<div style="margin: 12px 0 6px;"><img src="${escapeHtml(getSafeLogoDataUrl(e.logo_url))}" alt="Logo" style="max-width: 56px; max-height: 56px; border-radius: 8px; display: block;" /></div>`
                       : ''
                   }
 
@@ -584,11 +590,11 @@ router.get('/admin/events/:token', async (req, res) => {
             <h2>Branding</h2>
 
             ${
-              event.logo_url
+              getSafeLogoDataUrl(event.logo_url)
                 ? `
                   <div style="margin-bottom: 18px;">
                     <img
-                      src="${escapeHtml(event.logo_url)}"
+                      src="${escapeHtml(getSafeLogoDataUrl(event.logo_url))}"
                       alt="Event logo"
                       style="max-width: 140px; max-height: 140px; display: block; border-radius: 16px; border: 1px solid #ddd;"
                     />
@@ -624,6 +630,10 @@ router.get('/admin/events/:token', async (req, res) => {
                     type="color"
                     value="${escapeHtml(event.primary_color || '#1f3c88')}"
                   />
+                  <div class="color-preview">
+                    <span class="color-swatch" id="primary_color_preview" style="background:${escapeHtml(event.primary_color || '#1f3c88')};"></span>
+                    <span class="small muted" id="primary_color_value">${escapeHtml(event.primary_color || '#1f3c88')}</span>
+                  </div>
                 </div>
 
                 <div class="field">
@@ -634,6 +644,10 @@ router.get('/admin/events/:token', async (req, res) => {
                     type="color"
                     value="${escapeHtml(event.tertiary_color || '#eef3ff')}"
                   />
+                  <div class="color-preview">
+                    <span class="color-swatch" id="tertiary_color_preview" style="background:${escapeHtml(event.tertiary_color || '#eef3ff')};"></span>
+                    <span class="small muted" id="tertiary_color_value">${escapeHtml(event.tertiary_color || '#eef3ff')}</span>
+                  </div>
                 </div>
               </div>
 
@@ -641,10 +655,32 @@ router.get('/admin/events/:token', async (req, res) => {
                 <button type="submit">Save Theme</button>
               </div>
             </form>
+            <script>
+              (() => {
+                const wireColorPreview = (inputId, swatchId, textId) => {
+                  const input = document.getElementById(inputId);
+                  const swatch = document.getElementById(swatchId);
+                  const text = document.getElementById(textId);
+                  if (!input || !swatch || !text) return;
+
+                  const update = () => {
+                    const value = input.value || '';
+                    swatch.style.background = value;
+                    text.textContent = value;
+                  };
+
+                  input.addEventListener('input', update);
+                  update();
+                };
+
+                wireColorPreview('primary_color', 'primary_color_preview', 'primary_color_value');
+                wireColorPreview('tertiary_color', 'tertiary_color_preview', 'tertiary_color_value');
+              })();
+            </script>
 
             <hr style="margin: 24px 0;" />
 
-            <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/logo" enctype="multipart/form-data">
+            <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/logo?_csrf=${encodeURIComponent(req.csrfToken())}" enctype="multipart/form-data">
               <div class="field">
                 <label for="logoFile">Event Logo</label>
                 <input id="logoFile" type="file" name="logoFile" accept=".png,.jpg,.jpeg,.webp,.gif,image/*" />

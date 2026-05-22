@@ -7,6 +7,11 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function getSafeLogoDataUrl(value) {
+  const logoUrl = String(value || '').trim();
+  return logoUrl.startsWith('data:image/') ? logoUrl : '';
+}
+
 function renderLayout(title, body, options = {}) {
   const pageTitle = escapeHtml(title || 'Event Seating');
   const fullWidth = options.fullWidth ? 'container wide' : 'container';
@@ -75,11 +80,12 @@ function renderSearchPage(event, q, results) {
   const primaryColor = escapeHtml(event.primary_color || '#1f3c88');
   const tertiaryColor = escapeHtml(event.tertiary_color || '#eef3ff');
 
-  const logoHtml = event.logo_url
+  const safeLogoUrl = getSafeLogoDataUrl(event.logo_url);
+  const logoHtml = safeLogoUrl
     ? `
       <div class="event-logo-wrap">
         <img
-          src="${escapeHtml(event.logo_url)}"
+          src="${escapeHtml(safeLogoUrl)}"
           alt="${escapeHtml(event.name)} logo"
           class="event-logo"
         />
