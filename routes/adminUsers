@@ -8,6 +8,14 @@ const { VENUE_OPTIONS, parseSelectedVenues } = require('../lib/venues');
 
 const router = express.Router();
 
+function renderPostActionButton(action, label, className = 'button secondary') {
+  return `
+    <form method="POST" action="${action}" style="display:inline;">
+      <button class="${className}" type="submit">${label}</button>
+    </form>
+  `;
+}
+
 router.use('/admin', requireAdmin);
 router.use('/admin/users', requireSuperAdmin);
 
@@ -103,15 +111,15 @@ router.get('/admin/users', async (req, res) => {
                             <div class="actions" style="margin-top: 0;">
                               ${
                                 user.is_super_admin
-                                  ? `<a class="button secondary" href="/admin/users/${user.id}/demote">Demote</a>`
-                                  : `<a class="button secondary" href="/admin/users/${user.id}/promote">Promote</a>`
+                                  ? renderPostActionButton(`/admin/users/${user.id}/demote`, 'Demote')
+                                  : renderPostActionButton(`/admin/users/${user.id}/promote`, 'Promote')
                               }
                               <a class="button secondary" href="/admin/users/${user.id}/venues">Venues</a>
                               <a class="button secondary" href="/admin/users/${user.id}/password">Reset Password</a>
                               ${
                                 isSelf
                                   ? '<span class="muted small">Current user</span>'
-                                  : `<a class="button danger" href="/admin/users/${user.id}/delete">Delete</a>`
+                                  : renderPostActionButton(`/admin/users/${user.id}/delete`, 'Delete', 'button danger')
                               }
                             </div>
                           </td>
@@ -220,7 +228,9 @@ router.post('/admin/users/new', async (req, res) => {
   }
 });
 
-router.get('/admin/users/:id/promote', async (req, res) => {
+router.get('/admin/users/:id/promote', (req, res) => res.status(405).send('Method Not Allowed'));
+
+router.post('/admin/users/:id/promote', async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).send('Invalid admin id.');
 
@@ -240,7 +250,9 @@ router.get('/admin/users/:id/promote', async (req, res) => {
   }
 });
 
-router.get('/admin/users/:id/demote', async (req, res) => {
+router.get('/admin/users/:id/demote', (req, res) => res.status(405).send('Method Not Allowed'));
+
+router.post('/admin/users/:id/demote', async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).send('Invalid admin id.');
 
@@ -420,7 +432,9 @@ router.post('/admin/users/:id/venues', async (req, res) => {
   }
 });
 
-router.get('/admin/users/:id/delete', async (req, res) => {
+router.get('/admin/users/:id/delete', (req, res) => res.status(405).send('Method Not Allowed'));
+
+router.post('/admin/users/:id/delete', async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).send('Invalid admin id.');
 
