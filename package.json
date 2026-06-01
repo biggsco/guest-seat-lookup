@@ -15,9 +15,7 @@
     "express": "^5.1.0",
     "express-session": "^1.19.0",
     "multer": "^2.0.2",
-    "qrcode": "^1.5.4",
     "pg": "^8.13.1",
-    "xlsx": "^0.18.5",
-    "openid-client": "^6.6.2"
+    "xlsx": "^0.18.5"
   }
 }
