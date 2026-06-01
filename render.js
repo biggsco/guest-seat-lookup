@@ -72,21 +72,6 @@ function renderMappingSelect(name, headers, defaultValue) {
 }
 
 function renderSearchPage(event, q, results) {
-  const primaryColor = escapeHtml(event.primary_color || '#1f3c88');
-  const tertiaryColor = escapeHtml(event.tertiary_color || '#eef3ff');
-
-  const logoHtml = event.logo_url
-    ? `
-      <div class="event-logo-wrap">
-        <img
-          src="${escapeHtml(event.logo_url)}"
-          alt="${escapeHtml(event.name)} logo"
-          class="event-logo"
-        />
-      </div>
-    `
-    : '';
-
   const resultsHtml = q
     ? results.length > 0
       ? `
@@ -129,15 +114,10 @@ function renderSearchPage(event, q, results) {
   return renderLayout(
     event.name,
     `
-      <div
-        class="search-shell event-theme"
-        style="--event-primary: ${primaryColor}; --event-tertiary: ${tertiaryColor};"
-      >
+      <div class="search-shell">
         <div class="search-card">
-          ${logoHtml}
           <div class="muted small" style="margin-bottom: 8px;">Guest seating lookup</div>
           <h1>${escapeHtml(event.name)}</h1>
-          ${event.venue ? `<p class="muted" style="margin: 0 0 8px;"><strong>Venue:</strong> ${escapeHtml(event.venue)}</p>` : ''}
           <p class="muted" style="margin: 0 0 8px;">
             Search your name or company to find your assigned table.
           </p>

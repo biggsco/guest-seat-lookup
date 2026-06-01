@@ -1,5 +1,5 @@
 const express = require('express');
-const { pool } = require('../db');
+const { pool, testDb } = require('../db');
 const { escapeHtml, renderLayout, renderTopNav, renderSearchPage } = require('../render');
 
 const router = express.Router();
@@ -9,28 +9,29 @@ router.get('/', (req, res) => {
     renderLayout(
       'Guest Seating Lookup',
       `
-        <div class="hero">
-          <div>
-            <h1>Guest Seating Lookup</h1>
-            <p>
-              Upload event guest lists, map columns from CSV or Excel files, publish events,
-              and let guests search their table assignment through a public event link.
-            </p>
-          </div>
-        </div>
-
-        <div class="grid cards">
-          <div class="card">
-            <h2>System Status</h2>
-            <p class="muted">Check database connectivity and basic app health.</p>
-            <div class="actions">
-              <a class="button secondary" href="/health">Health Check</a>
-            </div>
+        <div class="panel" style="max-width: 720px; margin: 48px auto;">
+          <h1 style="margin-top:0;">Guest Seating Lookup</h1>
+          <p class="muted">
+            Sign in to upload a guest list and publish a simple seating search page.
+          </p>
+          <div class="actions">
+            <a class="button" href="/admin/login">Admin Login</a>
+            <a class="button secondary" href="/health">Health Check</a>
           </div>
         </div>
       `
     )
   );
+});
+
+
+router.get('/health', async (_req, res) => {
+  try {
+    const db = await testDb();
+    res.json({ ok: true, database: db.now });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 router.get('/search', async (req, res) => {
@@ -65,11 +66,7 @@ router.get('/e/:token', async (req, res) => {
       SELECT
         id,
         name,
-        public_token,
-        logo_url,
-        primary_color,
-        tertiary_color,
-        venue
+        public_token
       FROM events
       WHERE public_token = $1
         AND is_published = true
