@@ -1,10 +1,20 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
 const { pool } = require('../db');
 const { escapeHtml, renderLayout } = require('../render');
 const { requireAdmin, adminNav } = require('../lib/auth');
 
 const router = express.Router();
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `${req.ip}:${(req.body?.username || '').toLowerCase()}`,
+  message: 'Too many login attempts. Please wait 15 minutes and try again.'
+});
 
 async function getAdminByUsername(username) {
   const result = await pool.query(
@@ -63,7 +73,7 @@ router.get('/admin/login', (req, res) => {
   res.send(renderLoginPage({ next: safeNext }));
 });
 
-router.post('/admin/login', async (req, res) => {
+router.post('/admin/login', loginLimiter, async (req, res) => {
   const username = (req.body.username || '').trim();
   const password = String(req.body.password || '');
   const next = (req.body.next || '/admin/events').toString();
@@ -104,16 +114,25 @@ router.post('/admin/login', async (req, res) => {
       );
     }
 
-    req.session.adminUser = {
-      id: admin.id,
-      username: admin.username,
-      isSuperAdmin: Boolean(admin.is_super_admin),
-      allowedVenues: Array.isArray(admin.allowed_venues)
-        ? admin.allowed_venues
-        : []
-    };
+    req.session.regenerate((regenErr) => {
+      if (regenErr) {
+        return res.status(500).send(
+          renderLoginPage({ next: safeNext, username, error: regenErr.message })
+        );
+      }
 
-    return res.redirect(safeNext);
+      req.session.adminUser = {
+        id: admin.id,
+        username: admin.username,
+        isSuperAdmin: Boolean(admin.is_super_admin),
+        allowedVenues: Array.isArray(admin.allowed_venues)
+          ? admin.allowed_venues
+          : []
+      };
+
+      req.session.save(() => res.redirect(safeNext));
+    });
+    return;
   } catch (err) {
     return res.status(500).send(
       renderLoginPage({

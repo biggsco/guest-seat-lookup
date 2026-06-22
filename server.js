@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const session = require('express-session');
 const pgSession = require('connect-pg-simple');
+const helmet = require('helmet');
 const { pool } = require('./db');
 
 const publicRoutes = require('./routes/public');
@@ -24,9 +25,18 @@ if (isProduction && !process.env.SESSION_SECRET) {
 }
 
 if (isProduction) {
+  // Origin sits behind exactly one local reverse proxy/TLS terminator fed by
+  // Cloudflare (firewall restricts inbound HTTPS to Cloudflare + approved IPs).
+  // "1" trusts the single immediate hop's X-Forwarded-* headers; raise this
+  // only if another proxy hop is added in front of Node.
   app.set('trust proxy', 1);
 }
 
+app.use(
+  helmet({
+    contentSecurityPolicy: false
+  })
+);
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));

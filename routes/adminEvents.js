@@ -84,9 +84,11 @@ function renderEventActions(event) {
       <a class="button secondary" href="/admin/events/${token}/upload">Upload Excel</a>
       <a class="button secondary" href="/e/${token}">View Search</a>
       ${event.is_published
-        ? `<a class="button secondary" href="/admin/events/${token}/unpublish">Unpublish</a>`
-        : `<a class="button" href="/admin/events/${token}/publish">Publish</a>`}
-      <a class="button danger" href="/admin/events/${token}/delete" onclick="return confirm('Delete this event and all guests?')">Delete</a>
+        ? `<form method="POST" action="/admin/events/${token}/unpublish" style="display:inline;"><button class="button secondary" type="submit">Unpublish</button></form>`
+        : `<form method="POST" action="/admin/events/${token}/publish" style="display:inline;"><button class="button" type="submit">Publish</button></form>`}
+      <form method="POST" action="/admin/events/${token}/delete" style="display:inline;" onsubmit="return confirm('Delete this event and all guests?')">
+        <button class="button danger" type="submit">Delete</button>
+      </form>
     </div>
   `;
 }
@@ -390,21 +392,21 @@ router.post('/admin/events/:token/upload/confirm', async (req, res) => {
   return res.redirect(`/admin/events/${encodeURIComponent(event.public_token)}`);
 });
 
-router.get('/admin/events/:token/publish', async (req, res) => {
+router.post('/admin/events/:token/publish', async (req, res) => {
   const event = await getEventByToken(String(req.params.token || '').trim());
   if (!event) return res.status(404).send(renderLayout('Not Found', '<div class="notice danger">Event not found.</div>'));
   await pool.query('UPDATE events SET is_published = true WHERE id = $1', [event.id]);
   return res.redirect('/admin/events');
 });
 
-router.get('/admin/events/:token/unpublish', async (req, res) => {
+router.post('/admin/events/:token/unpublish', async (req, res) => {
   const event = await getEventByToken(String(req.params.token || '').trim());
   if (!event) return res.status(404).send(renderLayout('Not Found', '<div class="notice danger">Event not found.</div>'));
   await pool.query('UPDATE events SET is_published = false WHERE id = $1', [event.id]);
   return res.redirect('/admin/events');
 });
 
-router.get('/admin/events/:token/delete', async (req, res) => {
+router.post('/admin/events/:token/delete', async (req, res) => {
   const event = await getEventByToken(String(req.params.token || '').trim());
   if (!event) return res.status(404).send(renderLayout('Not Found', '<div class="notice danger">Event not found.</div>'));
   await pool.query('DELETE FROM guests WHERE event_id = $1', [event.id]);
