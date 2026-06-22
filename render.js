@@ -111,13 +111,19 @@ function renderSearchPage(event, q, results) {
       </div>
     `;
 
+  const brandColor = /^#[0-9a-fA-F]{6}$/.test(String(event.brand_color || '')) ? event.brand_color : null;
+  const logoHtml = event.has_logo
+    ? `<img src="/e/${encodeURIComponent(event.public_token)}/logo" alt="" style="max-height:64px; margin-bottom:12px;" />`
+    : '';
+
   return renderLayout(
     event.name,
     `
-      <div class="search-shell">
+      <div class="search-shell"${brandColor ? ` style="--brand-color: ${escapeHtml(brandColor)};"` : ''}>
         <div class="search-card">
+          ${logoHtml}
           <div class="muted small" style="margin-bottom: 8px;">Guest seating lookup</div>
-          <h1>${escapeHtml(event.name)}</h1>
+          <h1${brandColor ? ` style="color: var(--brand-color);"` : ''}>${escapeHtml(event.name)}</h1>
           <p class="muted" style="margin: 0 0 8px;">
             Search your name or company to find your assigned table.
           </p>
@@ -130,7 +136,7 @@ function renderSearchPage(event, q, results) {
               value="${escapeHtml(q)}"
               autofocus
             />
-            <button type="submit">Search</button>
+            <button type="submit"${brandColor ? ` style="background: var(--brand-color); border-color: var(--brand-color);"` : ''}>Search</button>
           </form>
 
           ${resultsHtml}
