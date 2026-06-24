@@ -280,9 +280,9 @@ router.get('/admin/events/:token', async (req, res) => {
       <p class="muted">Add a logo and accent color shown on the public lookup page and QR download.</p>
       <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/branding" enctype="multipart/form-data">
         <div class="field">
-          <label for="logo">Logo (PNG, JPEG, SVG or WebP, max 2MB)</label>
+          <label for="logo">Logo (PNG, JPEG or WebP, max 2MB)</label>
           ${event.has_logo ? `<div style="margin-bottom:8px;"><img src="/e/${encodeURIComponent(event.public_token)}/logo" alt="Current logo" style="max-height:48px;" /></div>` : ''}
-          <input id="logo" type="file" name="logo" accept="image/png,image/jpeg,image/svg+xml,image/webp" />
+          <input id="logo" type="file" name="logo" accept="image/png,image/jpeg,image/webp" />
         </div>
         <div class="field">
           <label for="brand_color">Accent color</label>
@@ -318,16 +318,40 @@ router.get('/admin/events/:token/qr', async (req, res) => {
   const event = await getEventByToken(String(req.params.token || '').trim());
   if (!event) return res.status(404).send(renderLayout('Not Found', '<div class="notice danger">Event not found.</div>'));
 
+  const logoResult = await pool.query('SELECT logo_data, logo_mime FROM events WHERE id = $1', [event.id]);
+  const logo = logoResult.rows[0];
+
+  const brandColor = /^#[0-9a-fA-F]{6}$/.test(String(event.brand_color || '')) ? event.brand_color : '#111827';
   const publicSearchUrl = getPublicSearchUrl(req, event.public_token);
-  const png = await QRCode.toBuffer(publicSearchUrl, {
-    width: 600,
+
+  const CANVAS_WIDTH = 1920;
+  const CANVAS_HEIGHT = 1080;
+  const QR_SIZE = 640;
+  const qrX = (CANVAS_WIDTH - QR_SIZE) / 2;
+  const qrY = (CANVAS_HEIGHT - QR_SIZE) / 2 - 60;
+
+  const qrPng = await QRCode.toBuffer(publicSearchUrl, {
+    width: QR_SIZE,
     margin: 2,
-    color: { dark: event.brand_color || '#000000', light: '#ffffffff' }
+    color: { dark: brandColor, light: '#ffffffff' }
   });
 
-  res.set('Content-Type', 'image/png');
-  res.set('Content-Disposition', `attachment; filename="${event.public_token}-qr.png"`);
-  res.send(png);
+  const logoTag = logo && logo.logo_data
+    ? `<image href="data:${logo.logo_mime};base64,${logo.logo_data.toString('base64')}" x="${CANVAS_WIDTH - 60 - 320}" y="60" width="320" height="160" preserveAspectRatio="xMidYMid meet" />`
+    : '';
+
+  const svg = `
+    <svg width="${CANVAS_WIDTH}" height="${CANVAS_HEIGHT}" viewBox="0 0 ${CANVAS_WIDTH} ${CANVAS_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+      <rect width="${CANVAS_WIDTH}" height="${CANVAS_HEIGHT}" fill="#ffffff" />
+      ${logoTag}
+      <image href="data:image/png;base64,${qrPng.toString('base64')}" x="${qrX}" y="${qrY}" width="${QR_SIZE}" height="${QR_SIZE}" />
+      <text x="${CANVAS_WIDTH / 2}" y="${qrY + QR_SIZE + 80}" font-family="Arial, Helvetica, sans-serif" font-size="56" font-weight="600" fill="${escapeHtml(brandColor)}" text-anchor="middle">Please scan to find your seat</text>
+    </svg>
+  `.trim();
+
+  res.set('Content-Type', 'image/svg+xml');
+  res.set('Content-Disposition', `attachment; filename="${event.public_token}-qr.svg"`);
+  res.send(svg);
 });
 
 router.get('/admin/events/:token/upload', async (req, res) => {
