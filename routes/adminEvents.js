@@ -280,9 +280,9 @@ router.get('/admin/events/:token', async (req, res) => {
       <p class="muted">Add a logo and accent color shown on the public lookup page and QR download.</p>
       <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/branding" enctype="multipart/form-data">
         <div class="field">
-          <label for="logo">Logo (PNG, JPEG, SVG or WebP, max 2MB)</label>
+          <label for="logo">Logo (PNG, JPEG or WebP, max 2MB)</label>
           ${event.has_logo ? `<div style="margin-bottom:8px;"><img src="/e/${encodeURIComponent(event.public_token)}/logo" alt="Current logo" style="max-height:48px;" /></div>` : ''}
-          <input id="logo" type="file" name="logo" accept="image/png,image/jpeg,image/svg+xml,image/webp" />
+          <input id="logo" type="file" name="logo" accept="image/png,image/jpeg,image/webp" />
         </div>
         <div class="field">
           <label for="brand_color">Accent color</label>
