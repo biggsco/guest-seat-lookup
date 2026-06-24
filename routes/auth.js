@@ -1,6 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const rateLimit = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const { pool } = require('../db');
 const { escapeHtml, renderLayout } = require('../render');
 const { requireAdmin, adminNav } = require('../lib/auth');
@@ -12,7 +12,7 @@ const loginLimiter = rateLimit({
   limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => `${req.ip}:${(req.body?.username || '').toLowerCase()}`,
+  keyGenerator: (req) => `${ipKeyGenerator(req.ip)}:${(req.body?.username || '').toLowerCase()}`,
   message: 'Too many login attempts. Please wait 15 minutes and try again.'
 });
 
