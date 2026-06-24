@@ -15,9 +15,11 @@ const {
 } = require('../lib/formatting');
 const {
   guestUpload,
+  logoUpload,
   generateUploadToken,
   parseWorkbookFromBuffer
 } = require('../lib/uploads');
+const QRCode = require('qrcode');
 
 const router = express.Router();
 
@@ -55,6 +57,8 @@ async function getEventByToken(token) {
       e.created_at,
       e.last_imported_at,
       e.last_import_file_name,
+      e.brand_color,
+      (e.logo_data IS NOT NULL) AS has_logo,
       COUNT(g.id)::int AS guest_count
     FROM events e
     LEFT JOIN guests g ON g.event_id = e.id
@@ -67,7 +71,9 @@ async function getEventByToken(token) {
       e.event_date,
       e.created_at,
       e.last_imported_at,
-      e.last_import_file_name
+      e.last_import_file_name,
+      e.brand_color,
+      e.logo_data
     `,
     [token]
   );
@@ -264,9 +270,64 @@ router.get('/admin/events/:token', async (req, res) => {
         <input id="public_url" type="text" readonly value="${escapeHtml(publicSearchUrl)}" />
       </div>
 
+      <div class="actions">
+        <a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/qr">Download QR Code</a>
+      </div>
+
       ${renderEventActions(event)}
+
+      <h2>Branding</h2>
+      <p class="muted">Add a logo and accent color shown on the public lookup page and QR download.</p>
+      <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/branding" enctype="multipart/form-data">
+        <div class="field">
+          <label for="logo">Logo (PNG, JPEG, SVG or WebP, max 2MB)</label>
+          ${event.has_logo ? `<div style="margin-bottom:8px;"><img src="/e/${encodeURIComponent(event.public_token)}/logo" alt="Current logo" style="max-height:48px;" /></div>` : ''}
+          <input id="logo" type="file" name="logo" accept="image/png,image/jpeg,image/svg+xml,image/webp" />
+        </div>
+        <div class="field">
+          <label for="brand_color">Accent color</label>
+          <input id="brand_color" type="color" name="brand_color" value="${escapeHtml(event.brand_color || '#2563eb')}" />
+        </div>
+        <div class="actions">
+          <button type="submit">Save Branding</button>
+        </div>
+      </form>
     </div>
   `));
+});
+
+router.post('/admin/events/:token/branding', logoUpload.single('logo'), async (req, res) => {
+  const event = await getEventByToken(String(req.params.token || '').trim());
+  if (!event) return res.status(404).send(renderLayout('Not Found', '<div class="notice danger">Event not found.</div>'));
+
+  const brandColor = /^#[0-9a-fA-F]{6}$/.test(String(req.body.brand_color || '')) ? req.body.brand_color : null;
+
+  if (req.file && req.file.buffer) {
+    await pool.query(
+      'UPDATE events SET logo_data = $2, logo_mime = $3, brand_color = $4 WHERE id = $1',
+      [event.id, req.file.buffer, req.file.mimetype, brandColor]
+    );
+  } else {
+    await pool.query('UPDATE events SET brand_color = $2 WHERE id = $1', [event.id, brandColor]);
+  }
+
+  return res.redirect(`/admin/events/${encodeURIComponent(event.public_token)}`);
+});
+
+router.get('/admin/events/:token/qr', async (req, res) => {
+  const event = await getEventByToken(String(req.params.token || '').trim());
+  if (!event) return res.status(404).send(renderLayout('Not Found', '<div class="notice danger">Event not found.</div>'));
+
+  const publicSearchUrl = getPublicSearchUrl(req, event.public_token);
+  const png = await QRCode.toBuffer(publicSearchUrl, {
+    width: 600,
+    margin: 2,
+    color: { dark: event.brand_color || '#000000', light: '#ffffffff' }
+  });
+
+  res.set('Content-Type', 'image/png');
+  res.set('Content-Disposition', `attachment; filename="${event.public_token}-qr.png"`);
+  res.send(png);
 });
 
 router.get('/admin/events/:token/upload', async (req, res) => {

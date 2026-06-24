@@ -66,7 +66,9 @@ router.get('/e/:token', async (req, res) => {
       SELECT
         id,
         name,
-        public_token
+        public_token,
+        brand_color,
+        (logo_data IS NOT NULL) AS has_logo
       FROM events
       WHERE public_token = $1
         AND is_published = true
@@ -145,6 +147,24 @@ router.get('/e/:token', async (req, res) => {
       )
     );
   }
+});
+
+router.get('/e/:token/logo', async (req, res) => {
+  const token = (req.params.token || '').trim();
+
+  const result = await pool.query(
+    'SELECT logo_data, logo_mime FROM events WHERE public_token = $1',
+    [token]
+  );
+
+  const row = result.rows[0];
+  if (!row || !row.logo_data) {
+    return res.status(404).end();
+  }
+
+  res.set('Content-Type', row.logo_mime || 'application/octet-stream');
+  res.set('Cache-Control', 'public, max-age=300');
+  res.send(row.logo_data);
 });
 
 router.get('/api/search', async (req, res) => {
