@@ -54,11 +54,13 @@ Set these on the host (e.g. in the systemd unit's `Environment=` lines or an
 | `PORT` | no | defaults to `10000` |
 | `DATABASE_URL` | yes | points at the local SSH tunnel, see above |
 | `SESSION_SECRET` | yes | long random string; server refuses to boot without it in production |
-| `ENTRA_TENANT_ID` | yes | Azure AD / Entra tenant ID (GUID) |
-| `ENTRA_CLIENT_ID` | yes | App registration client ID (GUID) |
-| `ENTRA_CLIENT_SECRET` | yes | Client secret value from the app registration |
-| `ENTRA_REDIRECT_URI` | recommended | Full callback URL, e.g. `https://lookup.yourdomain.com/auth/entra/callback` — falls back to `PUBLIC_BASE_URL` |
-| `SUPER_ADMIN_EMAIL` | first boot | Email of the first super admin (must match their Microsoft account UPN); no password needed — Entra handles auth. Remove after first login if you don't want it re-applied on every restart. |
+| `ENTRA_ENABLED` | no | Set to `true` to show the "Sign in with Microsoft" button alongside local login |
+| `ENTRA_TENANT_ID` | if Entra enabled | Azure AD / Entra tenant ID (GUID) |
+| `ENTRA_CLIENT_ID` | if Entra enabled | App registration client ID (GUID) |
+| `ENTRA_CLIENT_SECRET` | if Entra enabled | Client secret value from the app registration |
+| `ENTRA_REDIRECT_URI` | if Entra enabled | Full callback URL, e.g. `https://lookup.yourdomain.com/auth/entra/callback` |
+| `ENTRA_ALLOWED_EMAIL_DOMAIN` | if Entra enabled | Restrict Entra login to this domain, e.g. `avmc.com.au`. Any email at this domain gets basic (non-super) admin access without needing an entry in the admins table. Leave unset to allow any Entra-authenticated user. |
+| `SUPER_ADMIN_EMAIL` / `SUPER_ADMIN_PASSWORD` | first boot | Bootstraps the first local super admin account. `SUPER_ADMIN_PASSWORD` is optional if using Entra for the super admin's own access. Remove after first login. |
 | `PUBLIC_BASE_URL` | recommended | e.g. `https://lookup.yourdomain.com`, used to build public guest-search links correctly behind Cloudflare |
 | `ALLOW_SETUP_ROUTE` | no | leave unset/`false` in production; `/setup` is 404'd otherwise |
 

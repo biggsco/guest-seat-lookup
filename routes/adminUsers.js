@@ -1,6 +1,7 @@
 const express = require('express');
 const { renderLayout, escapeHtml } = require('../render');
 const { pool } = require('../db');
+const { hashPassword, validatePasswordComplexity } = require('../lib/adminUsers');
 
 const router = express.Router();
 
@@ -23,6 +24,10 @@ router.get('/admin/users', requireSuperAdmin, async (req, res) => {
         <form method="POST" action="/admin/users/${u.id}/toggle-super" style="display:inline;">
           <button class="button secondary" type="submit">${u.is_super_admin ? 'Demote' : 'Promote'}</button>
         </form>
+        <form method="POST" action="/admin/users/${u.id}/reset-password" style="display:inline;">
+          <input type="password" name="newPassword" minlength="12" required placeholder="New password (12+ chars)" style="width:200px;" />
+          <button class="button" type="submit">Reset password</button>
+        </form>
         ${req.session.adminUser.id === u.id ? '' : `
           <form method="POST" action="/admin/users/${u.id}/delete" style="display:inline;" onsubmit="return confirm('Delete this admin?')">
             <button class="button danger" type="submit">Delete</button>
@@ -35,17 +40,16 @@ router.get('/admin/users', requireSuperAdmin, async (req, res) => {
   res.send(renderLayout('Admin Users', `
     <section class="panel">
       <h1>Admin Users</h1>
-      <p class="muted">Add an admin by their Microsoft account email address. They must sign in via Microsoft — no passwords are stored.</p>
+      <p class="muted">Local admin accounts for password-based login. Microsoft Entra users (when enabled) sign in directly with their org email and do not need an entry here.</p>
 
       <form method="POST" action="/admin/users/create" style="display:flex; gap:8px; margin-bottom:24px; flex-wrap:wrap;">
-        <input name="email" type="email" required placeholder="admin@yourdomain.com" style="flex:1; min-width:240px;" />
-        <button class="button" type="submit">Add Admin</button>
+        <input name="username" required placeholder="username or email" style="flex:1; min-width:200px;" />
+        <input type="password" name="password" minlength="12" required placeholder="Strong password (12+ chars)" style="flex:1; min-width:200px;" />
+        <button class="button" type="submit">Create admin</button>
       </form>
 
       <table>
-        <thead>
-          <tr><th>Email</th><th>Super Admin</th><th>Actions</th></tr>
-        </thead>
+        <thead><tr><th>Username</th><th>Super Admin</th><th>Actions</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
 
@@ -55,14 +59,15 @@ router.get('/admin/users', requireSuperAdmin, async (req, res) => {
 });
 
 router.post('/admin/users/create', requireSuperAdmin, async (req, res) => {
-  const email = String(req.body.email || '').trim().toLowerCase();
-  if (!email || !email.includes('@')) return res.redirect('/admin/users');
+  const username = String(req.body.username || '').trim();
+  const password = String(req.body.password || '');
+  const validationError = validatePasswordComplexity(password);
+  if (!username || validationError) return res.redirect('/admin/users');
 
   await pool.query(
-    'INSERT INTO admins (username) VALUES ($1) ON CONFLICT (username) DO NOTHING',
-    [email]
+    'INSERT INTO admins (username, password_hash, is_super_admin) VALUES ($1, $2, FALSE) ON CONFLICT (username) DO NOTHING',
+    [username, hashPassword(password)]
   );
-
   return res.redirect('/admin/users');
 });
 
@@ -79,6 +84,16 @@ router.post('/admin/users/:id/toggle-super', requireSuperAdmin, async (req, res)
   }
 
   await pool.query('UPDATE admins SET is_super_admin = NOT is_super_admin, updated_at = NOW() WHERE id = $1', [userId]);
+  return res.redirect('/admin/users');
+});
+
+router.post('/admin/users/:id/reset-password', requireSuperAdmin, async (req, res) => {
+  const userId = Number(req.params.id);
+  const newPassword = String(req.body.newPassword || '');
+  const validationError = validatePasswordComplexity(newPassword);
+  if (validationError) return res.redirect('/admin/users');
+
+  await pool.query('UPDATE admins SET password_hash = $1, updated_at = NOW() WHERE id = $2', [hashPassword(newPassword), userId]);
   return res.redirect('/admin/users');
 });
 
