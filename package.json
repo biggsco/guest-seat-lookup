@@ -10,6 +10,7 @@
     "node": ">=24 <26"
   },
   "dependencies": {
+    "@azure/msal-node": "^5.4.0",
     "bcryptjs": "^3.0.3",
     "connect-pg-simple": "^10.0.0",
     "express": "^5.1.0",

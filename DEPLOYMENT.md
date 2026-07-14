@@ -54,11 +54,31 @@ Set these on the host (e.g. in the systemd unit's `Environment=` lines or an
 | `PORT` | no | defaults to `10000` |
 | `DATABASE_URL` | yes | points at the local SSH tunnel, see above |
 | `SESSION_SECRET` | yes | long random string; server refuses to boot without it in production |
-| `SUPER_ADMIN_EMAIL` / `SUPER_ADMIN_PASSWORD` | first boot | bootstraps the first super admin; password must meet the 12-char complexity policy in `lib/adminUsers.js`. Rotate/remove after first login if you don't want it re-applied on every restart. |
+| `ENTRA_TENANT_ID` | yes | Azure AD / Entra tenant ID (GUID) |
+| `ENTRA_CLIENT_ID` | yes | App registration client ID (GUID) |
+| `ENTRA_CLIENT_SECRET` | yes | Client secret value from the app registration |
+| `ENTRA_REDIRECT_URI` | recommended | Full callback URL, e.g. `https://lookup.yourdomain.com/auth/entra/callback` — falls back to `PUBLIC_BASE_URL` |
+| `SUPER_ADMIN_EMAIL` | first boot | Email of the first super admin (must match their Microsoft account UPN); no password needed — Entra handles auth. Remove after first login if you don't want it re-applied on every restart. |
 | `PUBLIC_BASE_URL` | recommended | e.g. `https://lookup.yourdomain.com`, used to build public guest-search links correctly behind Cloudflare |
 | `ALLOW_SETUP_ROUTE` | no | leave unset/`false` in production; `/setup` is 404'd otherwise |
 
-## 4. SFTP-only deploy accounts
+## 4. Microsoft Entra app registration (one-time)
+
+Admin login uses OAuth2/OIDC via Microsoft Entra. Set this up once in the Azure portal:
+
+1. **Azure portal → Entra ID → App registrations → New registration**
+   - Name: `Guest Seat Lookup` (or similar)
+   - Supported account types: **Single tenant** (your org only)
+   - Redirect URI: Web → `https://lookup.yourdomain.com/auth/entra/callback`
+2. After creation, note the **Application (client) ID** → `ENTRA_CLIENT_ID`
+3. Note the **Directory (tenant) ID** → `ENTRA_TENANT_ID`
+4. **Certificates & secrets → New client secret** → copy the value immediately → `ENTRA_CLIENT_SECRET`
+5. **API permissions** — the default `User.Read` delegated permission is sufficient; no extra scopes needed
+6. Add `https://lookup.yourdomain.com/auth/entra/callback` under **Authentication → Redirect URIs** if not already there
+
+To authorise an admin: add their Microsoft account email via **Admin → Users** in the app. Only emails pre-approved there can log in — authenticating with Microsoft is necessary but not sufficient.
+
+## 5. SFTP-only deploy accounts
 
 The deploy/upload SFTP account should only ever be used to push application
 code (and never hold DB credentials). Practical layout:
