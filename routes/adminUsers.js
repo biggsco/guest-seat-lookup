@@ -40,7 +40,7 @@ router.get('/admin/users', requireSuperAdmin, async (req, res) => {
   res.send(renderLayout('Admin Users', `
     <section class="panel">
       <h1>Admin Users</h1>
-      <p class="muted">Local admin accounts for password-based login. Microsoft Entra users (when enabled) sign in directly with their org email and do not need an entry here.</p>
+      <p class="muted">All admins appear here. Microsoft Entra users are added automatically on first sign-in and can be promoted to super admin below. Local accounts require a password.</p>
 
       <form method="POST" action="/admin/users/create" style="display:flex; gap:8px; margin-bottom:24px; flex-wrap:wrap;">
         <input name="username" required placeholder="username or email" style="flex:1; min-width:200px;" />
