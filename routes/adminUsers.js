@@ -5,6 +5,12 @@ const { hashPassword, validatePasswordComplexity } = require('../lib/adminUsers'
 
 const router = express.Router();
 
+const VENUES = [
+  'Adelaide Convention Centre',
+  'Adelaide Entertainment Centre',
+  'The Drive'
+];
+
 function requireSuperAdmin(req, res, next) {
   if (!req.session?.adminUser) return res.redirect(302, '/admin/login');
   if (!req.session.adminUser.isSuperAdmin) {
@@ -24,10 +30,6 @@ router.get('/admin/users', requireSuperAdmin, async (req, res) => {
         <form method="POST" action="/admin/users/${u.id}/toggle-super" style="display:inline;">
           <button class="button secondary" type="submit">${u.is_super_admin ? 'Demote' : 'Promote'}</button>
         </form>
-        <form method="POST" action="/admin/users/${u.id}/reset-password" style="display:inline;">
-          <input type="password" name="newPassword" minlength="12" required placeholder="New password (12+ chars)" style="width:200px;" />
-          <button class="button" type="submit">Reset password</button>
-        </form>
         ${req.session.adminUser.id === u.id ? '' : `
           <form method="POST" action="/admin/users/${u.id}/delete" style="display:inline;" onsubmit="return confirm('Delete this admin?')">
             <button class="button danger" type="submit">Delete</button>
@@ -42,11 +44,7 @@ router.get('/admin/users', requireSuperAdmin, async (req, res) => {
       <h1>Admin Users</h1>
       <p class="muted">All admins appear here. Microsoft Entra users are added automatically on first sign-in and can be promoted to super admin below. Local accounts require a password.</p>
 
-      <form method="POST" action="/admin/users/create" style="display:flex; gap:8px; margin-bottom:24px; flex-wrap:wrap;">
-        <input name="username" required placeholder="username or email" style="flex:1; min-width:200px;" />
-        <input type="password" name="password" minlength="12" required placeholder="Strong password (12+ chars)" style="flex:1; min-width:200px;" />
-        <button class="button" type="submit">Create admin</button>
-      </form>
+      <p><a class="button" href="/admin/users/new">Add Local Admin</a></p>
 
       <table>
         <thead><tr><th>Username</th><th>Super Admin</th><th>Actions</th></tr></thead>
@@ -58,15 +56,62 @@ router.get('/admin/users', requireSuperAdmin, async (req, res) => {
   `));
 });
 
+router.get('/admin/users/new', requireSuperAdmin, (req, res) => {
+  const venueCheckboxes = VENUES.map((v) => `
+    <label style="display:flex; align-items:center; gap:8px; margin-bottom:8px; cursor:pointer;">
+      <input type="checkbox" name="venues" value="${escapeHtml(v)}" />
+      ${escapeHtml(v)}
+    </label>
+  `).join('');
+
+  res.send(renderLayout('Create Admin User', `
+    <div class="panel" style="max-width: 560px; margin: 0 auto;">
+      <h1 style="margin-top:0;">Create Admin User</h1>
+      <form method="POST" action="/admin/users/create">
+        <div class="field">
+          <label for="username">Username</label>
+          <input id="username" name="username" required />
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" type="password" name="password" minlength="12" required />
+        </div>
+        <div class="field">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" name="is_super_admin" value="1" />
+            Super admin
+          </label>
+        </div>
+        <div class="field">
+          <label>Venue access</label>
+          <div style="margin-top:6px;">
+            ${venueCheckboxes}
+          </div>
+          <p class="muted small">Users will only see/manage events in selected venues.</p>
+        </div>
+        <div class="actions">
+          <button class="button" type="submit">Create Admin</button>
+          <a class="button secondary" href="/admin/users">Cancel</a>
+        </div>
+      </form>
+    </div>
+  `));
+});
+
 router.post('/admin/users/create', requireSuperAdmin, async (req, res) => {
   const username = String(req.body.username || '').trim();
   const password = String(req.body.password || '');
+  const isSuperAdmin = req.body.is_super_admin === '1';
+  const venues = Array.isArray(req.body.venues)
+    ? req.body.venues
+    : req.body.venues ? [req.body.venues] : [];
+
   const validationError = validatePasswordComplexity(password);
-  if (!username || validationError) return res.redirect('/admin/users');
+  if (!username || validationError) return res.redirect('/admin/users/new');
 
   await pool.query(
-    'INSERT INTO admins (username, password_hash, is_super_admin) VALUES ($1, $2, FALSE) ON CONFLICT (username) DO NOTHING',
-    [username, hashPassword(password)]
+    'INSERT INTO admins (username, password_hash, is_super_admin, allowed_venues) VALUES ($1, $2, $3, $4) ON CONFLICT (username) DO NOTHING',
+    [username, hashPassword(password), isSuperAdmin, venues]
   );
   return res.redirect('/admin/users');
 });
@@ -84,16 +129,6 @@ router.post('/admin/users/:id/toggle-super', requireSuperAdmin, async (req, res)
   }
 
   await pool.query('UPDATE admins SET is_super_admin = NOT is_super_admin, updated_at = NOW() WHERE id = $1', [userId]);
-  return res.redirect('/admin/users');
-});
-
-router.post('/admin/users/:id/reset-password', requireSuperAdmin, async (req, res) => {
-  const userId = Number(req.params.id);
-  const newPassword = String(req.body.newPassword || '');
-  const validationError = validatePasswordComplexity(newPassword);
-  if (validationError) return res.redirect('/admin/users');
-
-  await pool.query('UPDATE admins SET password_hash = $1, updated_at = NOW() WHERE id = $2', [hashPassword(newPassword), userId]);
   return res.redirect('/admin/users');
 });
 

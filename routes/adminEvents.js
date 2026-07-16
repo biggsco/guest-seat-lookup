@@ -128,15 +128,20 @@ router.get('/admin/events', async (req, res) => {
       `
     );
 
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+
     const eventsHtml = result.rows.length
       ? `
         <div class="grid cards">
-          ${result.rows.map((event) => `
-            <div class="card">
+          ${result.rows.map((event) => {
+            const isPast = event.event_date && new Date(event.event_date) < today;
+            const token = encodeURIComponent(event.public_token || '');
+            return `
+            <div class="card${isPast ? ' card-past' : ''}">
               <div class="event-card-header">
                 <div>
                   <h2 class="event-card-title">${escapeHtml(event.name || 'Untitled Event')}</h2>
-                  <div class="muted small" style="margin-top:6px;">${escapeHtml(formatDate(event.event_date))}</div>
+                  <div class="muted small" style="margin-top:6px;">${escapeHtml(formatDate(event.event_date))}${isPast ? ' <span class="badge">Past</span>' : ''}</div>
                 </div>
                 <span class="badge ${event.is_published ? 'published' : 'draft'}">${event.is_published ? 'Published' : 'Draft'}</span>
               </div>
@@ -153,13 +158,20 @@ router.get('/admin/events', async (req, res) => {
               </div>
 
               <div class="event-meta">
-                <div>Public link: <a href="/e/${encodeURIComponent(event.public_token || '')}">/e/${escapeHtml(event.public_token || '')}</a></div>
+                <div>Public link: <a href="/e/${token}">/e/${escapeHtml(event.public_token || '')}</a></div>
                 <div>Updated: ${escapeHtml(formatDateTime(event.last_imported_at))}</div>
               </div>
 
-              ${renderEventActions(event)}
+              ${isPast
+                ? `<div class="actions">
+                    <form method="POST" action="/admin/events/${token}/delete" onsubmit="return confirm('Delete this event and all guests?')">
+                      <button class="button danger" type="submit">Delete</button>
+                    </form>
+                  </div>`
+                : renderEventActions(event)
+              }
             </div>
-          `).join('')}
+          `}).join('')}
         </div>
       `
       : `

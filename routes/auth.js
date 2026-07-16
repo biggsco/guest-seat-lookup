@@ -23,46 +23,40 @@ function safeNext(value) {
 }
 
 function renderLoginPage({ next = '/admin/events', username = '', error = '' } = {}) {
-  const entraButton = isEntraEnabled()
-    ? `
-      <div style="margin-bottom: 16px;">
-        <a class="button" style="width:100%; box-sizing:border-box; text-align:center;" href="/auth/entra${next !== '/admin/events' ? `?next=${encodeURIComponent(next)}` : ''}">
-          Sign in with Microsoft
-        </a>
+  const entraEnabled = isEntraEnabled();
+
+  const localForm = entraEnabled ? '' : `
+    <form method="POST" action="/admin/login">
+      <input type="hidden" name="next" value="${escapeHtml(next)}" />
+      <div class="field">
+        <label for="username">Username</label>
+        <input id="username" name="username" autocomplete="username" required value="${escapeHtml(username)}" />
       </div>
-      <div class="muted" style="text-align:center; margin-bottom:16px;">or sign in with a local account</div>
-    `
-    : '';
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" type="password" name="password" autocomplete="current-password" required />
+      </div>
+      <div class="actions">
+        <button type="submit">Log In</button>
+        <a class="button secondary" href="/">Home</a>
+      </div>
+    </form>
+  `;
+
+  const entraButton = entraEnabled ? `
+    <a class="button" style="width:100%; box-sizing:border-box; text-align:center;" href="/auth/entra${next !== '/admin/events' ? `?next=${encodeURIComponent(next)}` : ''}">
+      Sign in with Microsoft
+    </a>
+  ` : '';
 
   return renderLayout(
     'Admin Login',
     `
       <div class="panel" style="max-width: 520px; margin: 48px auto;">
         <h1 style="margin-top: 0;">Admin Login</h1>
-        <p class="muted">Sign in to manage events and uploads.</p>
-
         ${error ? `<div class="notice danger">${escapeHtml(error)}</div>` : ''}
-
         ${entraButton}
-
-        <form method="POST" action="/admin/login">
-          <input type="hidden" name="next" value="${escapeHtml(next)}" />
-
-          <div class="field">
-            <label for="username">Username</label>
-            <input id="username" name="username" autocomplete="username" required value="${escapeHtml(username)}" />
-          </div>
-
-          <div class="field">
-            <label for="password">Password</label>
-            <input id="password" type="password" name="password" autocomplete="current-password" required />
-          </div>
-
-          <div class="actions">
-            <button type="submit">Log In</button>
-            <a class="button secondary" href="/">Home</a>
-          </div>
-        </form>
+        ${localForm}
       </div>
     `
   );
