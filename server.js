@@ -12,6 +12,7 @@ const adminUserRoutes = require('./routes/adminUsers');
 const setupRoutes = require('./routes/setup');
 const { ensureAdminUserTable, upsertSuperAdminFromEnv } = require('./lib/adminUsers');
 const { ensureGuestSeatsTable } = require('./lib/guestSeats');
+const { startRetentionJob } = require('./lib/retention');
 
 const app = express();
 const PgSession = pgSession(session);
@@ -70,6 +71,7 @@ async function start() {
   await ensureAdminUserTable();
   await ensureGuestSeatsTable();
   await upsertSuperAdminFromEnv();
+  startRetentionJob();
 
   app.listen(PORT, HOST, () => {
     console.log(`Running on ${PORT}`);
