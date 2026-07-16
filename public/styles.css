@@ -337,3 +337,10 @@ th {
     width: 100%;
   }
 }
+
+.card-past {
+  opacity: 0.45;
+}
+.card-past:hover {
+  opacity: 0.65;
+}
