@@ -454,13 +454,16 @@ router.post('/admin/events/:token/upload/confirm', async (req, res) => {
   }
 
   const rows = state.parsed.rows.map((row) => {
-    const fullName = Number.isInteger(fullNameCol) && fullNameCol >= 0 ? normalizeCell(row[fullNameCol]) : '';
+    const fullNameRaw = Number.isInteger(fullNameCol) && fullNameCol >= 0 ? normalizeCell(row[fullNameCol]) : '';
     const firstName = Number.isInteger(firstNameCol) && firstNameCol >= 0 ? normalizeCell(row[firstNameCol]) : '';
     const lastName = Number.isInteger(lastNameCol) && lastNameCol >= 0 ? normalizeCell(row[lastNameCol]) : '';
     const combinedName = [firstName, lastName].filter(Boolean).join(' ').trim();
+    const fullName = fullNameRaw || combinedName;
 
     return {
-      fullName: fullName || combinedName,
+      fullName,
+      firstName,
+      lastName,
       company: Number.isInteger(companyCol) && companyCol >= 0 ? normalizeCell(row[companyCol]) : '',
       tableName: normalizeCell(row[tableCol])
     };
@@ -472,8 +475,8 @@ router.post('/admin/events/:token/upload/confirm', async (req, res) => {
     await client.query('DELETE FROM guests WHERE event_id = $1', [event.id]);
     for (const row of rows) {
       await client.query(
-        'INSERT INTO guests (event_id, full_name, company, table_name) VALUES ($1, $2, $3, $4)',
-        [event.id, row.fullName, row.company, row.tableName]
+        'INSERT INTO guests (event_id, full_name, first_name, last_name, company, table_name) VALUES ($1, $2, $3, $4, $5, $6)',
+        [event.id, row.fullName, row.firstName, row.lastName, row.company, row.tableName]
       );
     }
     await client.query('UPDATE events SET last_imported_at = NOW(), last_import_file_name = $2 WHERE id = $1', [event.id, state.parsed.originalName]);
