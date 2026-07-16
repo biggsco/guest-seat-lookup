@@ -575,11 +575,12 @@ router.post('/admin/events/:token/upload/confirm', async (req, res) => {
     return res.status(400).send(renderLayout('Upload Expired', `<div class="panel"><div class="notice danger">Upload session expired. Please upload the file again.</div><a class="button" href="/admin/events/${encodeURIComponent(event.public_token)}/upload">Upload Again</a></div>`));
   }
 
-  const fullNameCol = Number(req.body.full_name_col);
-  const firstNameCol = Number(req.body.first_name_col);
-  const lastNameCol = Number(req.body.last_name_col);
-  const companyCol = Number(req.body.company_col);
-  const tableCol = Number(req.body.table_col);
+  const parseCol = (v) => { if (String(v || '').trim() === '') return -1; const n = Number(v); return Number.isInteger(n) && n >= 0 ? n : -1; };
+  const fullNameCol = parseCol(req.body.full_name_col);
+  const firstNameCol = parseCol(req.body.first_name_col);
+  const lastNameCol = parseCol(req.body.last_name_col);
+  const companyCol = parseCol(req.body.company_col);
+  const tableCol = parseCol(req.body.table_col);
 
   if (!Number.isInteger(tableCol) || tableCol < 0) {
     return res.status(400).send(renderLayout('Mapping Error', '<div class="notice danger">Table column is required.</div>'));
