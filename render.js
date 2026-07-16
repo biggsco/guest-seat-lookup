@@ -89,9 +89,7 @@ function renderSearchPage(event, q, results) {
             const table = escapeHtml(rawTable || 'Not assigned');
 
             const title = name || company || 'Guest';
-            const subtitle = name && company && company !== name
-              ? company
-              : (!name && company ? 'Company listing' : '');
+            const subtitle = !rawLast && rawCompany && rawCompany !== computedName ? company : '';
 
             return `
               <div class="result-card">

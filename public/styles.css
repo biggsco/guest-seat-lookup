@@ -350,3 +350,48 @@ th {
 .card-past:hover {
   opacity: 0.65;
 }
+
+.drop-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  padding: 36px 24px;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.15s, background 0.15s;
+  background: var(--bg);
+  position: relative;
+}
+.drop-zone input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+}
+.drop-zone.dragover {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+.drop-zone .dz-icon {
+  font-size: 2rem;
+  line-height: 1;
+}
+.drop-zone .dz-label {
+  font-weight: 600;
+  color: var(--text);
+}
+.drop-zone .dz-hint {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.drop-zone .dz-filename {
+  font-size: 0.85rem;
+  color: var(--primary);
+  font-weight: 500;
+}
