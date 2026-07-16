@@ -2,8 +2,7 @@ const express = require('express');
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const { pool } = require('../db');
 const { escapeHtml, renderLayout } = require('../render');
-const { requireAdmin, adminNav } = require('../lib/auth');
-const { verifyPassword, validatePasswordComplexity, hashPassword } = require('../lib/adminUsers');
+const { requireAdmin } = require('../lib/auth');
 const { buildAuthUrl, exchangeCode, isEntraEnabled, getAllowedDomain } = require('../lib/entra');
 
 const router = express.Router();
@@ -183,8 +182,6 @@ router.get('/auth/entra/callback', async (req, res) => {
   }
 });
 
-// ── Local account password management ────────────────────────────────────────
-
 router.get('/admin/logout', (req, res) => {
   if (!req.session) return res.redirect('/admin/login');
   req.session.destroy(() => res.redirect('/admin/login'));
@@ -192,66 +189,5 @@ router.get('/admin/logout', (req, res) => {
 
 router.get('/admin', (req, res) => res.redirect('/admin/events'));
 
-router.get('/admin/account/password', requireAdmin, (req, res) => {
-  res.send(
-    renderLayout(
-      'Update Password',
-      `
-        ${adminNav(req, [{ href: '/admin/events', label: 'Back to Events' }])}
-        <div class="panel" style="max-width: 620px; margin: 0 auto;">
-          <h1 style="margin-top: 0;">Update Password</h1>
-          <p class="muted">Signed in as <strong>${escapeHtml(req.session.adminUser.username)}</strong>.</p>
-          <form method="POST" action="/admin/account/password">
-            <div class="field">
-              <label for="current_password">Current Password</label>
-              <input id="current_password" type="password" name="current_password" required />
-            </div>
-            <div class="field">
-              <label for="new_password">New Password</label>
-              <input id="new_password" type="password" name="new_password" required />
-            </div>
-            <div class="actions">
-              <button type="submit">Update Password</button>
-              <a class="button secondary" href="/admin/events">Cancel</a>
-            </div>
-          </form>
-        </div>
-      `
-    )
-  );
-});
-
-router.post('/admin/account/password', requireAdmin, async (req, res) => {
-  const currentPassword = String(req.body.current_password || '');
-  const newPassword = String(req.body.new_password || '');
-
-  const renderError = (msg) => res.status(400).send(renderLayout('Update Password', `
-    ${adminNav(req, [{ href: '/admin/events', label: 'Back to Events' }])}
-    <div class="panel" style="max-width: 620px; margin: 0 auto;">
-      <h1 style="margin-top: 0;">Update Password</h1>
-      <div class="notice danger">${escapeHtml(msg)}</div>
-      <a class="button secondary" href="/admin/account/password">Try again</a>
-    </div>
-  `));
-
-  if (!currentPassword || !newPassword) return renderError('Current and new password are required.');
-
-  const err = validatePasswordComplexity(newPassword);
-  if (err) return renderError(err);
-
-  try {
-    const result = await pool.query('SELECT id, password_hash FROM admins WHERE id = $1', [req.session.adminUser.id]);
-    const admin = result.rows[0];
-
-    if (!admin) return renderError('Admin account not found.');
-    if (!admin.password_hash) return renderError('This account uses Microsoft sign-in and does not have a password.');
-    if (!verifyPassword(currentPassword, admin.password_hash)) return renderError('Current password is incorrect.');
-
-    await pool.query('UPDATE admins SET password_hash = $2, updated_at = NOW() WHERE id = $1', [admin.id, hashPassword(newPassword)]);
-    return res.redirect('/admin/events?flash=password_updated');
-  } catch (e) {
-    return renderError(e.message);
-  }
-});
 
 module.exports = router;
