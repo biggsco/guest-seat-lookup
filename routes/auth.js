@@ -225,26 +225,32 @@ router.post('/admin/account/password', requireAdmin, async (req, res) => {
   const currentPassword = String(req.body.current_password || '');
   const newPassword = String(req.body.new_password || '');
 
-  if (!currentPassword || !newPassword) {
-    return res.status(400).send('Current and new password are required.');
-  }
+  const renderError = (msg) => res.status(400).send(renderLayout('Update Password', `
+    ${adminNav(req, [{ href: '/admin/events', label: 'Back to Events' }])}
+    <div class="panel" style="max-width: 620px; margin: 0 auto;">
+      <h1 style="margin-top: 0;">Update Password</h1>
+      <div class="notice danger">${escapeHtml(msg)}</div>
+      <a class="button secondary" href="/admin/account/password">Try again</a>
+    </div>
+  `));
+
+  if (!currentPassword || !newPassword) return renderError('Current and new password are required.');
 
   const err = validatePasswordComplexity(newPassword);
-  if (err) return res.status(400).send(escapeHtml(err));
+  if (err) return renderError(err);
 
   try {
     const result = await pool.query('SELECT id, password_hash FROM admins WHERE id = $1', [req.session.adminUser.id]);
     const admin = result.rows[0];
 
-    if (!admin) return res.status(404).send('Admin account not found.');
-    if (!admin.password_hash || !verifyPassword(currentPassword, admin.password_hash)) {
-      return res.status(401).send('Current password is incorrect.');
-    }
+    if (!admin) return renderError('Admin account not found.');
+    if (!admin.password_hash) return renderError('This account uses Microsoft sign-in and does not have a password.');
+    if (!verifyPassword(currentPassword, admin.password_hash)) return renderError('Current password is incorrect.');
 
     await pool.query('UPDATE admins SET password_hash = $2, updated_at = NOW() WHERE id = $1', [admin.id, hashPassword(newPassword)]);
-    return res.redirect('/admin/events');
+    return res.redirect('/admin/events?flash=password_updated');
   } catch (e) {
-    return res.status(500).send(escapeHtml(e.message));
+    return renderError(e.message);
   }
 });
 
