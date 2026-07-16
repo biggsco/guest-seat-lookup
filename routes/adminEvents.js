@@ -21,6 +21,7 @@ const {
   parseWorkbookFromBuffer
 } = require('../lib/uploads');
 const QRCode = require('qrcode');
+const { VENUE_OPTIONS } = require('../lib/venues');
 
 const router = express.Router();
 
@@ -59,6 +60,8 @@ async function getEventByToken(token) {
       e.last_imported_at,
       e.last_import_file_name,
       e.brand_color,
+      e.venue,
+      e.event_code,
       (e.logo_data IS NOT NULL) AS has_logo,
       COUNT(g.id)::int AS guest_count
     FROM events e
@@ -74,6 +77,8 @@ async function getEventByToken(token) {
       e.last_imported_at,
       e.last_import_file_name,
       e.brand_color,
+      e.venue,
+      e.event_code,
       e.logo_data
     `,
     [token]
@@ -86,24 +91,26 @@ function renderEventActions(event, { showManage = true } = {}) {
   const token = encodeURIComponent(event.public_token || '');
 
   return `
-    <div class="actions" style="align-items:center;">
+    <div class="actions">
       ${showManage ? `<a class="button secondary" href="/admin/events/${token}">Manage</a>` : ''}
       <a class="button secondary" href="/admin/events/${token}/upload">Upload Excel</a>
       <a class="button secondary" href="/e/${token}">View Search</a>
       ${event.is_published
-        ? `<form method="POST" action="/admin/events/${token}/unpublish" style="display:inline;"><button class="button secondary" type="submit">Unpublish</button></form>`
-        : `<form method="POST" action="/admin/events/${token}/publish" style="display:inline;"><button class="button" type="submit">Publish</button></form>`}
-      <span style="margin-left:auto;">
-        <form method="POST" action="/admin/events/${token}/delete" style="display:inline;" onsubmit="return confirm('Delete this event and all guests?')">
-          <button class="button danger" type="submit">Delete</button>
-        </form>
-      </span>
+        ? `<form method="POST" action="/admin/events/${token}/unpublish"><button class="button secondary" type="submit">Unpublish</button></form>`
+        : `<form method="POST" action="/admin/events/${token}/publish"><button class="button" type="submit">Publish</button></form>`}
+      <form method="POST" action="/admin/events/${token}/delete" style="margin-left:auto;" onsubmit="return confirm('Delete this event and all guests?')">
+        <button class="button danger" type="submit">Delete</button>
+      </form>
     </div>
   `;
 }
 
 router.get('/admin/events', async (req, res) => {
   try {
+    const allowedVenues = req.session.adminUser.isSuperAdmin
+      ? null
+      : (req.session.adminUser.allowedVenues || []);
+
     const result = await pool.query(
       `
       SELECT
@@ -112,23 +119,27 @@ router.get('/admin/events', async (req, res) => {
         e.public_token,
         e.is_published,
         e.event_date,
-        e.created_at,
+        e.venue,
+        e.event_code,
         e.last_imported_at,
         e.last_import_file_name,
         COUNT(g.id)::int AS guest_count
       FROM events e
       LEFT JOIN guests g ON g.event_id = e.id
+      WHERE ($1::TEXT[] IS NULL OR e.venue = ANY($1::TEXT[]))
       GROUP BY
         e.id,
         e.name,
         e.public_token,
         e.is_published,
         e.event_date,
-        e.created_at,
+        e.venue,
+        e.event_code,
         e.last_imported_at,
         e.last_import_file_name
       ORDER BY e.id DESC
-      `
+      `,
+      [allowedVenues]
     );
 
     const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -144,7 +155,7 @@ router.get('/admin/events', async (req, res) => {
               <div class="event-card-header">
                 <div>
                   <h2 class="event-card-title">${escapeHtml(event.name || 'Untitled Event')}</h2>
-                  <div class="muted small" style="margin-top:6px;">${escapeHtml(formatDate(event.event_date))}${isPast ? ' <span class="badge">Past</span>' : ''}</div>
+                  <div class="muted small" style="margin-top:6px;">${event.venue ? escapeHtml(event.venue) + ' &middot; ' : ''}${escapeHtml(formatDate(event.event_date))}${isPast ? ' <span class="badge">Past</span>' : ''}${event.event_code ? ` &middot; <span style="font-family:monospace;">${escapeHtml(event.event_code)}</span>` : ''}</div>
                 </div>
                 <span class="badge ${event.is_published ? 'published' : 'draft'}">${event.is_published ? 'Published' : 'Draft'}</span>
               </div>
@@ -209,6 +220,10 @@ router.get('/admin/events', async (req, res) => {
 });
 
 router.get('/admin/events/new', (_req, res) => {
+  const venueOptions = VENUE_OPTIONS.map((v) =>
+    `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`
+  ).join('');
+
   const body = `
     ${adminNav(_req, [{ href: '/admin/events', label: 'Events' }])}
     <div class="panel" style="max-width: 720px; margin: 0 auto;">
@@ -221,6 +236,17 @@ router.get('/admin/events/new', (_req, res) => {
         <div class="field">
           <label for="event_date">Event date</label>
           <input id="event_date" type="date" name="event_date" />
+        </div>
+        <div class="field">
+          <label for="venue">Venue</label>
+          <select id="venue" name="venue">
+            <option value="">— Select venue —</option>
+            ${venueOptions}
+          </select>
+        </div>
+        <div class="field">
+          <label for="event_code">Event code <span class="muted" style="font-weight:400;">(optional reference)</span></label>
+          <input id="event_code" type="text" name="event_code" placeholder="e.g. EVT-001" />
         </div>
         <div class="actions">
           <button type="submit">Create Event</button>
@@ -236,6 +262,8 @@ router.get('/admin/events/new', (_req, res) => {
 router.post('/admin/events/new', async (req, res) => {
   const name = String(req.body?.name || '').trim();
   const eventDate = parseEventDateInput(req.body?.event_date);
+  const venue = VENUE_OPTIONS.includes(String(req.body?.venue || '')) ? String(req.body.venue) : null;
+  const eventCode = String(req.body?.event_code || '').trim() || null;
 
   if (!name) {
     return res.status(400).send(renderLayout('Validation Error', '<div class="notice danger">Event name is required.</div>'));
@@ -243,8 +271,8 @@ router.post('/admin/events/new', async (req, res) => {
 
   const token = generateToken();
   await pool.query(
-    'INSERT INTO events (name, public_token, event_date, is_published) VALUES ($1, $2, $3, false)',
-    [name, token, eventDate]
+    'INSERT INTO events (name, public_token, event_date, venue, event_code, is_published) VALUES ($1, $2, $3, $4, $5, false)',
+    [name, token, eventDate, venue, eventCode]
   );
 
   return res.redirect(`/admin/events/${encodeURIComponent(token)}?flash=event_created`);
@@ -260,6 +288,9 @@ router.get('/admin/events/:token', async (req, res) => {
   const publicSearchUrl = getPublicSearchUrl(req, event.public_token);
 
   const dateValue = event.event_date ? String(event.event_date).slice(0, 10) : '';
+  const venueOptions = VENUE_OPTIONS.map((v) =>
+    `<option value="${escapeHtml(v)}"${event.venue === v ? ' selected' : ''}>${escapeHtml(v)}</option>`
+  ).join('');
 
   return res.send(renderLayout(`Manage: ${event.name}`, `
     ${adminNav(req, [{ href: '/admin/events', label: 'Events' }])}
@@ -268,7 +299,9 @@ router.get('/admin/events/:token', async (req, res) => {
       <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
         <div>
           <h1 style="margin-top:0;">${escapeHtml(event.name)}</h1>
-          <p class="muted" style="margin:0;">${event.event_date ? escapeHtml(formatDate(event.event_date)) : 'No date set'} &middot; <span class="badge ${event.is_published ? 'published' : 'draft'}" style="font-size:0.78rem;">${event.is_published ? 'Published' : 'Draft'}</span></p>
+          <p class="muted" style="margin:0;">
+            ${event.venue ? `${escapeHtml(event.venue)} &middot; ` : ''}${event.event_date ? escapeHtml(formatDate(event.event_date)) : 'No date set'}${event.event_code ? ` &middot; <span style="font-family:monospace;">${escapeHtml(event.event_code)}</span>` : ''} &middot; <span class="badge ${event.is_published ? 'published' : 'draft'}" style="font-size:0.78rem;">${event.is_published ? 'Published' : 'Draft'}</span>
+          </p>
         </div>
         <button class="button secondary" type="button" onclick="document.getElementById('edit-event-form').style.display = document.getElementById('edit-event-form').style.display === 'none' ? 'block' : 'none';">Edit Details</button>
       </div>
@@ -282,6 +315,17 @@ router.get('/admin/events/:token', async (req, res) => {
           <div class="field">
             <label for="edit_date">Event date</label>
             <input id="edit_date" type="date" name="event_date" value="${escapeHtml(dateValue)}" />
+          </div>
+          <div class="field">
+            <label for="edit_venue">Venue</label>
+            <select id="edit_venue" name="venue">
+              <option value="">— Select venue —</option>
+              ${venueOptions}
+            </select>
+          </div>
+          <div class="field">
+            <label for="edit_event_code">Event code</label>
+            <input id="edit_event_code" type="text" name="event_code" value="${escapeHtml(event.event_code || '')}" placeholder="e.g. EVT-001" />
           </div>
           <div class="actions">
             <button type="submit">Save Changes</button>
@@ -316,9 +360,34 @@ router.get('/admin/events/:token', async (req, res) => {
       <p class="muted">Add a logo and accent color shown on the public lookup page and QR download.</p>
       <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/branding" enctype="multipart/form-data">
         <div class="field">
-          <label for="logo">Logo (PNG, JPEG or WebP, max 2MB)</label>
+          <label>Logo (PNG, JPEG or WebP, max 2MB)</label>
           ${event.has_logo ? `<div style="margin-bottom:8px;"><img src="/e/${encodeURIComponent(event.public_token)}/logo" alt="Current logo" style="max-height:48px;" /></div>` : ''}
-          <input id="logo" type="file" name="logo" accept="image/png,image/jpeg,image/webp" />
+          <div class="drop-zone" id="logo-drop-zone">
+            <input id="logo" type="file" name="logo" accept="image/png,image/jpeg,image/webp" />
+            <div class="dz-icon">🖼️</div>
+            <div class="dz-label">Drop logo here or click to browse</div>
+            <div class="dz-hint">PNG, JPEG or WebP · max 2MB</div>
+            <div class="dz-filename" id="logo-file-name" style="display:none;"></div>
+          </div>
+          <script>
+            (function() {
+              var dz = document.getElementById('logo-drop-zone');
+              var inp = document.getElementById('logo');
+              var fn = document.getElementById('logo-file-name');
+              inp.addEventListener('change', function() {
+                if (inp.files[0]) { fn.textContent = inp.files[0].name; fn.style.display = ''; }
+              });
+              dz.addEventListener('dragover', function(e) { e.preventDefault(); dz.classList.add('dragover'); });
+              dz.addEventListener('dragleave', function() { dz.classList.remove('dragover'); });
+              dz.addEventListener('drop', function(e) {
+                e.preventDefault(); dz.classList.remove('dragover');
+                if (e.dataTransfer.files[0]) {
+                  inp.files = e.dataTransfer.files;
+                  fn.textContent = e.dataTransfer.files[0].name; fn.style.display = '';
+                }
+              });
+            })();
+          </script>
         </div>
         <div class="field">
           <label for="brand_color">Accent color</label>
@@ -338,9 +407,11 @@ router.post('/admin/events/:token/edit', async (req, res) => {
 
   const name = String(req.body.name || '').trim();
   const eventDate = parseEventDateInput(req.body.event_date);
+  const venue = VENUE_OPTIONS.includes(String(req.body?.venue || '')) ? String(req.body.venue) : null;
+  const eventCode = String(req.body?.event_code || '').trim() || null;
   if (!name) return res.redirect(`/admin/events/${encodeURIComponent(event.public_token)}?flash=event_updated`);
 
-  await pool.query('UPDATE events SET name = $2, event_date = $3 WHERE id = $1', [event.id, name, eventDate]);
+  await pool.query('UPDATE events SET name = $2, event_date = $3, venue = $4, event_code = $5 WHERE id = $1', [event.id, name, eventDate, venue, eventCode]);
   return res.redirect(`/admin/events/${encodeURIComponent(event.public_token)}?flash=event_updated`);
 });
 
@@ -411,16 +482,41 @@ router.get('/admin/events/:token/upload', async (req, res) => {
     <div class="panel" style="max-width: 840px; margin: 0 auto;">
       <h1 style="margin-top: 0;">Upload Guest List</h1>
       <p class="muted"><strong>${escapeHtml(event.name)}</strong></p>
-      <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/upload" enctype="multipart/form-data">
+      <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/upload" enctype="multipart/form-data" id="upload-form">
         <div class="field">
-          <label for="guest_file">Excel or CSV file</label>
-          <input id="guest_file" type="file" name="guest_file" accept=".csv,.xlsx,.xls" required />
+          <label>Excel or CSV file</label>
+          <div class="drop-zone" id="guest-drop-zone">
+            <input id="guest_file" type="file" name="guest_file" accept=".csv,.xlsx,.xls" required />
+            <div class="dz-icon">📂</div>
+            <div class="dz-label">Drop file here or click to browse</div>
+            <div class="dz-hint">.xlsx, .xls or .csv</div>
+            <div class="dz-filename" id="guest-file-name" style="display:none;"></div>
+          </div>
         </div>
         <div class="actions">
           <button type="submit">Continue</button>
           <a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}">Cancel</a>
         </div>
       </form>
+      <script>
+        (function() {
+          var dz = document.getElementById('guest-drop-zone');
+          var inp = document.getElementById('guest_file');
+          var fn = document.getElementById('guest-file-name');
+          inp.addEventListener('change', function() {
+            if (inp.files[0]) { fn.textContent = inp.files[0].name; fn.style.display = ''; }
+          });
+          dz.addEventListener('dragover', function(e) { e.preventDefault(); dz.classList.add('dragover'); });
+          dz.addEventListener('dragleave', function() { dz.classList.remove('dragover'); });
+          dz.addEventListener('drop', function(e) {
+            e.preventDefault(); dz.classList.remove('dragover');
+            if (e.dataTransfer.files[0]) {
+              inp.files = e.dataTransfer.files;
+              fn.textContent = e.dataTransfer.files[0].name; fn.style.display = '';
+            }
+          });
+        })();
+      </script>
     </div>`;
 
   return res.send(renderLayout(`Upload: ${event.name}`, body));
