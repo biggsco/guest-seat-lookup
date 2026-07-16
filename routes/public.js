@@ -103,27 +103,27 @@ router.get('/e/:token', async (req, res) => {
       const likeTerms = parts.map((part) => `%${part}%`);
       const dbResult = await pool.query(
         `
-        SELECT full_name, company, table_name
+        SELECT full_name, first_name, last_name, company, table_name
         FROM guests
         WHERE event_id = $1
           AND (
-            full_name ILIKE $2
-            OR company ILIKE $2
+            last_name  ILIKE $2
+            OR first_name ILIKE $2
+            OR full_name  ILIKE $2
+            OR company    ILIKE $2
             OR (
               cardinality($3::TEXT[]) > 0
               AND EXISTS (
                 SELECT 1
                 FROM unnest($3::TEXT[]) AS term
-                WHERE full_name ILIKE term OR company ILIKE term
+                WHERE last_name ILIKE term OR first_name ILIKE term
+                   OR full_name ILIKE term OR company    ILIKE term
               )
             )
           )
         ORDER BY
-          CASE WHEN full_name ILIKE $4 OR company ILIKE $4 THEN 0 ELSE 1 END,
-          CASE
-            WHEN COALESCE(NULLIF(full_name, ''), '') = '' THEN company
-            ELSE full_name
-          END ASC
+          CASE WHEN last_name ILIKE $4 OR company ILIKE $4 THEN 0 ELSE 1 END,
+          COALESCE(NULLIF(last_name, ''), NULLIF(full_name, ''), company) ASC
         LIMIT 50
         `,
         [event.id, `%${q}%`, likeTerms, `${q}%`]
@@ -194,21 +194,21 @@ router.get('/api/search', async (req, res) => {
 
     const dbResult = await pool.query(
       `
-      SELECT full_name, company, table_name
+      SELECT full_name, first_name, last_name, company, table_name
       FROM guests
       WHERE event_id = $1
         AND (
-          full_name ILIKE $2
-          OR company ILIKE $2
+          last_name  ILIKE $2
+          OR first_name ILIKE $2
+          OR full_name  ILIKE $2
+          OR company    ILIKE $2
         )
       ORDER BY
-        CASE
-          WHEN COALESCE(NULLIF(full_name, ''), '') = '' THEN company
-          ELSE full_name
-        END ASC
+        CASE WHEN last_name ILIKE $3 OR company ILIKE $3 THEN 0 ELSE 1 END,
+        COALESCE(NULLIF(last_name, ''), NULLIF(full_name, ''), company) ASC
       LIMIT 50
       `,
-      [eventId, `%${q}%`]
+      [eventId, `%${q}%`, `${q}%`]
     );
 
     res.json(dbResult.rows);
