@@ -248,6 +248,11 @@ textarea:focus {
   border-left: 4px solid var(--danger);
 }
 
+.notice.success {
+  border-left: 4px solid var(--success);
+  color: var(--success);
+}
+
 .empty-state {
   padding: 36px 20px;
   text-align: center;
@@ -340,6 +345,7 @@ th {
 
 .card-past {
   opacity: 0.45;
+  transition: opacity 0.2s ease;
 }
 .card-past:hover {
   opacity: 0.65;

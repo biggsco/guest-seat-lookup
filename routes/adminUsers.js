@@ -1,7 +1,8 @@
 const express = require('express');
-const { renderLayout, escapeHtml } = require('../render');
+const { renderLayout, escapeHtml, renderFlash } = require('../render');
 const { pool } = require('../db');
 const { hashPassword, validatePasswordComplexity } = require('../lib/adminUsers');
+const { adminNav } = require('../lib/auth');
 
 const router = express.Router();
 
@@ -40,6 +41,8 @@ router.get('/admin/users', requireSuperAdmin, async (req, res) => {
   `).join('');
 
   res.send(renderLayout('Admin Users', `
+    ${adminNav(req, [{ href: '/admin/events', label: 'Events' }])}
+    ${renderFlash(req)}
     <section class="panel">
       <h1>Admin Users</h1>
       <p class="muted">All admins appear here. Microsoft Entra users are added automatically on first sign-in and can be promoted to super admin below. Local accounts require a password.</p>
@@ -50,13 +53,12 @@ router.get('/admin/users', requireSuperAdmin, async (req, res) => {
         <thead><tr><th>Username</th><th>Super Admin</th><th>Actions</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-
-      <p><a class="button secondary" href="/admin/events">Back to Events</a></p>
     </section>
   `));
 });
 
 router.get('/admin/users/new', requireSuperAdmin, (req, res) => {
+  const error = String(req.query.error || '').trim();
   const venueCheckboxes = VENUES.map((v) => `
     <label style="display:flex; align-items:center; gap:8px; margin-bottom:8px; cursor:pointer;">
       <input type="checkbox" name="venues" value="${escapeHtml(v)}" />
@@ -65,8 +67,10 @@ router.get('/admin/users/new', requireSuperAdmin, (req, res) => {
   `).join('');
 
   res.send(renderLayout('Create Admin User', `
+    ${adminNav(req, [{ href: '/admin/users', label: 'Users' }])}
     <div class="panel" style="max-width: 560px; margin: 0 auto;">
       <h1 style="margin-top:0;">Create Admin User</h1>
+      ${error ? `<div class="notice danger">${escapeHtml(error)}</div>` : ''}
       <form method="POST" action="/admin/users/create">
         <div class="field">
           <label for="username">Username</label>
@@ -75,6 +79,7 @@ router.get('/admin/users/new', requireSuperAdmin, (req, res) => {
         <div class="field">
           <label for="password">Password</label>
           <input id="password" type="password" name="password" minlength="12" required />
+          <p class="muted small" style="margin:4px 0 0;">Min 12 characters, must include uppercase, lowercase, number and symbol.</p>
         </div>
         <div class="field">
           <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
@@ -106,14 +111,16 @@ router.post('/admin/users/create', requireSuperAdmin, async (req, res) => {
     ? req.body.venues
     : req.body.venues ? [req.body.venues] : [];
 
+  if (!username) return res.redirect('/admin/users/new?error=Username+is+required.');
   const validationError = validatePasswordComplexity(password);
-  if (!username || validationError) return res.redirect('/admin/users/new');
+  if (validationError) return res.redirect(`/admin/users/new?error=${encodeURIComponent(validationError)}`);
 
-  await pool.query(
+  const result = await pool.query(
     'INSERT INTO admins (username, password_hash, is_super_admin, allowed_venues) VALUES ($1, $2, $3, $4) ON CONFLICT (username) DO NOTHING',
     [username, hashPassword(password), isSuperAdmin, venues]
   );
-  return res.redirect('/admin/users');
+  if (result.rowCount === 0) return res.redirect(`/admin/users/new?error=${encodeURIComponent('Username already exists.')}`);
+  return res.redirect('/admin/users?flash=user_created');
 });
 
 router.post('/admin/users/:id/toggle-super', requireSuperAdmin, async (req, res) => {
@@ -143,7 +150,7 @@ router.post('/admin/users/:id/delete', requireSuperAdmin, async (req, res) => {
   }
 
   await pool.query('DELETE FROM admins WHERE id = $1', [userId]);
-  return res.redirect('/admin/users');
+  return res.redirect('/admin/users?flash=user_deleted');
 });
 
 module.exports = router;

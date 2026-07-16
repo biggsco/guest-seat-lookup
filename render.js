@@ -77,16 +77,19 @@ function renderSearchPage(event, q, results) {
       ? `
         <div class="results-list">
           ${results.map(row => {
-            const rawName = row.full_name || '';
+            const rawFirst = row.first_name || '';
+            const rawLast = row.last_name || '';
+            const rawFull = row.full_name || '';
             const rawCompany = row.company || '';
             const rawTable = row.table_name || '';
 
-            const name = escapeHtml(rawName);
+            const computedName = [rawFirst, rawLast].filter(Boolean).join(' ') || rawFull;
+            const name = escapeHtml(computedName);
             const company = escapeHtml(rawCompany);
             const table = escapeHtml(rawTable || 'Not assigned');
 
             const title = name || company || 'Guest';
-            const subtitle = name && company
+            const subtitle = name && company && company !== name
               ? company
               : (!name && company ? 'Company listing' : '');
 
@@ -146,11 +149,41 @@ function renderSearchPage(event, q, results) {
   );
 }
 
+const FLASH_MESSAGES = {
+  imported:         'Guest list imported successfully.',
+  published:        'Event published.',
+  unpublished:      'Event unpublished.',
+  branding_saved:   'Branding saved.',
+  event_created:    'Event created.',
+  event_updated:    'Event updated.',
+  user_created:     'Admin user created.',
+  user_deleted:     'Admin user deleted.',
+  password_updated: 'Password updated.'
+};
+
+function renderFlash(req) {
+  const key = String(req.query.flash || '').trim();
+  if (!key || !FLASH_MESSAGES[key]) return '';
+  return `
+    <div class="notice success" style="margin-bottom:16px;">
+      ${escapeHtml(FLASH_MESSAGES[key])}
+    </div>
+    <script>
+      if (window.history && window.history.replaceState) {
+        const u = new URL(window.location.href);
+        u.searchParams.delete('flash');
+        window.history.replaceState(null, '', u.toString());
+      }
+    </script>
+  `;
+}
+
 module.exports = {
   escapeHtml,
   renderLayout,
   renderTopNav,
   renderSearchPage,
   renderPreviewTable,
-  renderMappingSelect
+  renderMappingSelect,
+  renderFlash
 };

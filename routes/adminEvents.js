@@ -4,7 +4,8 @@ const {
   escapeHtml,
   renderLayout,
   renderPreviewTable,
-  renderMappingSelect
+  renderMappingSelect,
+  renderFlash
 } = require('../render');
 const { requireAdmin, adminNav } = require('../lib/auth');
 const {
@@ -81,20 +82,22 @@ async function getEventByToken(token) {
   return result.rows[0] || null;
 }
 
-function renderEventActions(event) {
+function renderEventActions(event, { showManage = true } = {}) {
   const token = encodeURIComponent(event.public_token || '');
 
   return `
-    <div class="actions">
-      <a class="button secondary" href="/admin/events/${token}">Manage</a>
+    <div class="actions" style="align-items:center;">
+      ${showManage ? `<a class="button secondary" href="/admin/events/${token}">Manage</a>` : ''}
       <a class="button secondary" href="/admin/events/${token}/upload">Upload Excel</a>
       <a class="button secondary" href="/e/${token}">View Search</a>
       ${event.is_published
         ? `<form method="POST" action="/admin/events/${token}/unpublish" style="display:inline;"><button class="button secondary" type="submit">Unpublish</button></form>`
         : `<form method="POST" action="/admin/events/${token}/publish" style="display:inline;"><button class="button" type="submit">Publish</button></form>`}
-      <form method="POST" action="/admin/events/${token}/delete" style="display:inline;" onsubmit="return confirm('Delete this event and all guests?')">
-        <button class="button danger" type="submit">Delete</button>
-      </form>
+      <span style="margin-left:auto;">
+        <form method="POST" action="/admin/events/${token}/delete" style="display:inline;" onsubmit="return confirm('Delete this event and all guests?')">
+          <button class="button danger" type="submit">Delete</button>
+        </form>
+      </span>
     </div>
   `;
 }
@@ -186,6 +189,7 @@ router.get('/admin/events', async (req, res) => {
 
     const body = `
       ${adminNav(req, [{ href: '/', label: 'Home' }])}
+      ${renderFlash(req)}
       <div class="hero">
         <div>
           <h1>Events</h1>
@@ -243,7 +247,7 @@ router.post('/admin/events/new', async (req, res) => {
     [name, token, eventDate]
   );
 
-  return res.redirect(`/admin/events/${encodeURIComponent(token)}`);
+  return res.redirect(`/admin/events/${encodeURIComponent(token)}?flash=event_created`);
 });
 
 router.get('/admin/events/:token', async (req, res) => {
@@ -255,26 +259,46 @@ router.get('/admin/events/:token', async (req, res) => {
 
   const publicSearchUrl = getPublicSearchUrl(req, event.public_token);
 
+  const dateValue = event.event_date ? String(event.event_date).slice(0, 10) : '';
+
   return res.send(renderLayout(`Manage: ${event.name}`, `
     ${adminNav(req, [{ href: '/admin/events', label: 'Events' }])}
+    ${renderFlash(req)}
     <div class="panel" style="max-width: 860px; margin: 0 auto;">
-      <h1 style="margin-top:0;">${escapeHtml(event.name)}</h1>
-      <p class="muted">Simple guest seating lookup.</p>
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <div>
+          <h1 style="margin-top:0;">${escapeHtml(event.name)}</h1>
+          <p class="muted" style="margin:0;">${event.event_date ? escapeHtml(formatDate(event.event_date)) : 'No date set'} &middot; <span class="badge ${event.is_published ? 'published' : 'draft'}" style="font-size:0.78rem;">${event.is_published ? 'Published' : 'Draft'}</span></p>
+        </div>
+        <button class="button secondary" type="button" onclick="document.getElementById('edit-event-form').style.display = document.getElementById('edit-event-form').style.display === 'none' ? 'block' : 'none';">Edit Details</button>
+      </div>
 
-      <div class="stats">
+      <div id="edit-event-form" style="display:none; margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">
+        <form method="POST" action="/admin/events/${encodeURIComponent(event.public_token)}/edit">
+          <div class="field">
+            <label for="edit_name">Event name</label>
+            <input id="edit_name" type="text" name="name" value="${escapeHtml(event.name)}" required />
+          </div>
+          <div class="field">
+            <label for="edit_date">Event date</label>
+            <input id="edit_date" type="date" name="event_date" value="${escapeHtml(dateValue)}" />
+          </div>
+          <div class="actions">
+            <button type="submit">Save Changes</button>
+            <button class="button secondary" type="button" onclick="document.getElementById('edit-event-form').style.display='none';">Cancel</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="stats" style="margin-top:20px;">
         <div class="stat">
           <div class="stat-label">Guests</div>
           <div class="stat-value">${event.guest_count}</div>
         </div>
         <div class="stat">
-          <div class="stat-label">Status</div>
-          <div class="small">${event.is_published ? 'Published' : 'Draft'}</div>
+          <div class="stat-label">Last Import</div>
+          <div class="small">${escapeHtml(event.last_import_file_name || 'None')}<br/><span class="muted">${escapeHtml(formatDateTime(event.last_imported_at))}</span></div>
         </div>
-      </div>
-
-      <div class="event-meta">
-        <div>Event date: ${escapeHtml(formatDate(event.event_date))}</div>
-        <div>Last import: ${escapeHtml(event.last_import_file_name || 'None')} (${escapeHtml(formatDateTime(event.last_imported_at))})</div>
       </div>
 
       <div class="field" style="margin-top:18px;">
@@ -282,11 +306,11 @@ router.get('/admin/events/:token', async (req, res) => {
         <input id="public_url" type="text" readonly value="${escapeHtml(publicSearchUrl)}" />
       </div>
 
-      <div class="actions">
+      ${renderEventActions(event, { showManage: false })}
+
+      <div class="actions" style="margin-top:0;">
         <a class="button secondary" href="/admin/events/${encodeURIComponent(event.public_token)}/qr">Download QR Code</a>
       </div>
-
-      ${renderEventActions(event)}
 
       <h2>Branding</h2>
       <p class="muted">Add a logo and accent color shown on the public lookup page and QR download.</p>
@@ -308,6 +332,18 @@ router.get('/admin/events/:token', async (req, res) => {
   `));
 });
 
+router.post('/admin/events/:token/edit', async (req, res) => {
+  const event = await getEventByToken(String(req.params.token || '').trim());
+  if (!event) return res.status(404).send(renderLayout('Not Found', '<div class="notice danger">Event not found.</div>'));
+
+  const name = String(req.body.name || '').trim();
+  const eventDate = parseEventDateInput(req.body.event_date);
+  if (!name) return res.redirect(`/admin/events/${encodeURIComponent(event.public_token)}?flash=event_updated`);
+
+  await pool.query('UPDATE events SET name = $2, event_date = $3 WHERE id = $1', [event.id, name, eventDate]);
+  return res.redirect(`/admin/events/${encodeURIComponent(event.public_token)}?flash=event_updated`);
+});
+
 router.post('/admin/events/:token/branding', logoUpload.single('logo'), async (req, res) => {
   const event = await getEventByToken(String(req.params.token || '').trim());
   if (!event) return res.status(404).send(renderLayout('Not Found', '<div class="notice danger">Event not found.</div>'));
@@ -323,7 +359,7 @@ router.post('/admin/events/:token/branding', logoUpload.single('logo'), async (r
     await pool.query('UPDATE events SET brand_color = $2 WHERE id = $1', [event.id, brandColor]);
   }
 
-  return res.redirect(`/admin/events/${encodeURIComponent(event.public_token)}`);
+  return res.redirect(`/admin/events/${encodeURIComponent(event.public_token)}?flash=branding_saved`);
 });
 
 router.get('/admin/events/:token/qr', async (req, res) => {
@@ -489,21 +525,21 @@ router.post('/admin/events/:token/upload/confirm', async (req, res) => {
     uploadSessions.delete(uploadToken);
   }
 
-  return res.redirect(`/admin/events/${encodeURIComponent(event.public_token)}`);
+  return res.redirect(`/admin/events/${encodeURIComponent(event.public_token)}?flash=imported`);
 });
 
 router.post('/admin/events/:token/publish', async (req, res) => {
   const event = await getEventByToken(String(req.params.token || '').trim());
   if (!event) return res.status(404).send(renderLayout('Not Found', '<div class="notice danger">Event not found.</div>'));
   await pool.query('UPDATE events SET is_published = true WHERE id = $1', [event.id]);
-  return res.redirect('/admin/events');
+  return res.redirect(`/admin/events/${encodeURIComponent(event.public_token)}?flash=published`);
 });
 
 router.post('/admin/events/:token/unpublish', async (req, res) => {
   const event = await getEventByToken(String(req.params.token || '').trim());
   if (!event) return res.status(404).send(renderLayout('Not Found', '<div class="notice danger">Event not found.</div>'));
   await pool.query('UPDATE events SET is_published = false WHERE id = $1', [event.id]);
-  return res.redirect('/admin/events');
+  return res.redirect(`/admin/events/${encodeURIComponent(event.public_token)}?flash=unpublished`);
 });
 
 router.post('/admin/events/:token/delete', async (req, res) => {
