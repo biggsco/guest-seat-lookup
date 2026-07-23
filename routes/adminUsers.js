@@ -1,7 +1,6 @@
 const express = require('express');
 const { renderLayout, escapeHtml, renderFlash } = require('../render');
 const { pool } = require('../db');
-const { hashPassword, validatePasswordComplexity } = require('../lib/adminUsers');
 const { adminNav } = require('../lib/auth');
 
 const router = express.Router();
@@ -73,13 +72,9 @@ router.get('/admin/users/new', requireSuperAdmin, (req, res) => {
       ${error ? `<div class="notice danger">${escapeHtml(error)}</div>` : ''}
       <form method="POST" action="/admin/users/create">
         <div class="field">
-          <label for="username">Username</label>
-          <input id="username" name="username" required />
-        </div>
-        <div class="field">
-          <label for="password">Password</label>
-          <input id="password" type="password" name="password" minlength="12" required />
-          <p class="muted small" style="margin:4px 0 0;">Min 12 characters, must include uppercase, lowercase, number and symbol.</p>
+          <label for="username">Email address</label>
+          <input id="username" name="username" type="email" placeholder="user@example.com" required />
+          <p class="muted small" style="margin:4px 0 0;">Must match their Microsoft account email. They'll sign in via Microsoft — no password needed.</p>
         </div>
         <div class="field">
           <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
@@ -104,20 +99,17 @@ router.get('/admin/users/new', requireSuperAdmin, (req, res) => {
 });
 
 router.post('/admin/users/create', requireSuperAdmin, async (req, res) => {
-  const username = String(req.body.username || '').trim();
-  const password = String(req.body.password || '');
+  const username = String(req.body.username || '').trim().toLowerCase();
   const isSuperAdmin = req.body.is_super_admin === '1';
   const venues = Array.isArray(req.body.venues)
     ? req.body.venues
     : req.body.venues ? [req.body.venues] : [];
 
-  if (!username) return res.redirect('/admin/users/new?error=Username+is+required.');
-  const validationError = validatePasswordComplexity(password);
-  if (validationError) return res.redirect(`/admin/users/new?error=${encodeURIComponent(validationError)}`);
+  if (!username) return res.redirect('/admin/users/new?error=Email+address+is+required.');
 
   const result = await pool.query(
-    'INSERT INTO admins (username, password_hash, is_super_admin, allowed_venues) VALUES ($1, $2, $3, $4) ON CONFLICT (username) DO NOTHING',
-    [username, hashPassword(password), isSuperAdmin, venues]
+    'INSERT INTO admins (username, is_super_admin, allowed_venues) VALUES ($1, $2, $3) ON CONFLICT (username) DO NOTHING',
+    [username, isSuperAdmin, venues]
   );
   if (result.rowCount === 0) return res.redirect(`/admin/users/new?error=${encodeURIComponent('Username already exists.')}`);
   return res.redirect('/admin/users?flash=user_created');
@@ -150,6 +142,7 @@ router.post('/admin/users/:id/delete', requireSuperAdmin, async (req, res) => {
   }
 
   await pool.query('DELETE FROM admins WHERE id = $1', [userId]);
+  await pool.query(`DELETE FROM user_sessions WHERE sess->'adminUser'->>'id' = $1::text`, [String(userId)]);
   return res.redirect('/admin/users?flash=user_deleted');
 });
 
