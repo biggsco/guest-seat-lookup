@@ -142,6 +142,7 @@ router.post('/admin/users/:id/delete', requireSuperAdmin, async (req, res) => {
   }
 
   await pool.query('DELETE FROM admins WHERE id = $1', [userId]);
+  await pool.query(`DELETE FROM user_sessions WHERE sess->'adminUser'->>'id' = $1::text`, [String(userId)]);
   return res.redirect('/admin/users?flash=user_deleted');
 });
 
