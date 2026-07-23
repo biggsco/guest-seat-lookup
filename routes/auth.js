@@ -149,17 +149,15 @@ router.get('/auth/entra/callback', async (req, res) => {
       return res.redirect(`/admin/login?error=Access+restricted+to+${encodeURIComponent(allowedDomain)}+accounts.`);
     }
 
-    // Upsert into admins table so the user appears in Admin → Users
-    // and can be promoted/demoted by a super admin. Preserve existing
-    // is_super_admin if they already have a row.
-    const upsertResult = await pool.query(
-      `INSERT INTO admins (username, is_super_admin)
-       VALUES ($1, FALSE)
-       ON CONFLICT (username) DO UPDATE SET updated_at = NOW()
-       RETURNING id, username, is_super_admin, allowed_venues`,
+    const lookup = await pool.query(
+      'SELECT id, username, is_super_admin, allowed_venues FROM admins WHERE lower(username) = lower($1)',
       [email]
     );
-    const admin = upsertResult.rows[0];
+    const admin = lookup.rows[0];
+
+    if (!admin) {
+      return res.redirect('/admin/login?error=Your+account+has+not+been+granted+access.+Contact+a+super+admin.');
+    }
 
     await new Promise((resolve, reject) =>
       req.session.regenerate((e) => (e ? reject(e) : resolve()))

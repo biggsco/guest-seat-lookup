@@ -468,9 +468,29 @@ router.get('/admin/events/:token/qr', async (req, res) => {
     </svg>
   `.trim();
 
-  res.set('Content-Type', 'image/svg+xml');
-  res.set('Content-Disposition', `attachment; filename="${event.public_token}-qr.svg"`);
-  res.send(svg);
+  const svgB64 = Buffer.from(svg).toString('base64');
+  const filename = `${event.public_token}-qr.png`;
+
+  res.send(`<!doctype html><html><head><title>Downloading…</title></head><body>
+    <p style="font-family:sans-serif;padding:32px;">Preparing PNG download…</p>
+    <canvas id="c" style="display:none;"></canvas>
+    <script>
+      var img = new Image();
+      img.onload = function() {
+        var c = document.getElementById('c');
+        c.width = ${CANVAS_WIDTH}; c.height = ${CANVAS_HEIGHT};
+        c.getContext('2d').drawImage(img, 0, 0);
+        c.toBlob(function(blob) {
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = ${JSON.stringify(filename)};
+          document.body.appendChild(a); a.click();
+          setTimeout(function(){ window.close(); }, 1000);
+        }, 'image/png');
+      };
+      img.src = 'data:image/svg+xml;base64,${svgB64}';
+    </script>
+  </body></html>`);
 });
 
 router.get('/admin/events/:token/upload', async (req, res) => {
