@@ -99,7 +99,7 @@ router.get('/admin/users/new', requireSuperAdmin, (req, res) => {
 });
 
 router.post('/admin/users/create', requireSuperAdmin, async (req, res) => {
-  const username = String(req.body.username || '').trim();
+  const username = String(req.body.username || '').trim().toLowerCase();
   const isSuperAdmin = req.body.is_super_admin === '1';
   const venues = Array.isArray(req.body.venues)
     ? req.body.venues
